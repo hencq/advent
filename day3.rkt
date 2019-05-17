@@ -17,16 +17,18 @@
     (hash-update cloth (cons i j) add1 0)))
 
 (define (claim-cloth/tracking claim cloth unclaimed)
-  (for*/fold [(cloth cloth)
-              (unclaimed unclaimed)]
-             [(i (in-range (claim-left claim) (+ (claim-left claim) (claim-width claim))))
-              (j (in-range (claim-top claim) (+ (claim-top claim) (claim-height claim))))]
-    (define square (hash-ref cloth (cons i j) '()))
-    (define new-square (cons (claim-id claim) square))
-    (define new-cloth (hash-set cloth (cons i j) new-square))
-    (if (empty? square)
-        (values new-cloth unclaimed)
-        (values new-cloth (set-subtract unclaimed (list->seteq new-square))))))
+  (define-values (new-cloth claimed)
+    (for*/fold [(cloth cloth)
+                (claimed '())]
+               [(i (in-range (claim-left claim) (+ (claim-left claim) (claim-width claim))))
+                (j (in-range (claim-top claim) (+ (claim-top claim) (claim-height claim))))]
+      (define square (hash-ref cloth (cons i j) '()))
+      (define new-square (cons (claim-id claim) square))
+      (define new-cloth (hash-set cloth (cons i j) new-square))
+      (if (empty? square)
+          (values new-cloth claimed)
+          (values new-cloth (append claimed new-square)))))
+  (values new-cloth (set-subtract unclaimed (list->seteq claimed))))
 
 (define (find-unclaimed claim-strs)
   (define claims (map match-claim claim-strs))
