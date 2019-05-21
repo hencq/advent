@@ -87,8 +87,7 @@
     (printf "~a: ~a [~a]~%" i (state->string state) plants)
     (define-values (new-state len sum) (step state rules))
     (printf "Len: ~a~%" len)
-    (values new-state len sum)
- )
+    (values new-state len sum) )
   (void))
 
 ;; After a while it just keeps increasing the total sum by 98
