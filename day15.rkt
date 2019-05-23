@@ -1,8 +1,9 @@
 #lang racket
 (require graph
+         data/queue
          rackunit)
 
-(struct game (map players graph) #:transparent)
+(struct game (map players) #:transparent)
 
 (define (read-map fname)
   (define lines (file->lines fname))
@@ -21,22 +22,15 @@
                                #\.)]
           [else ch]))))
 
-  (define edges
-    (for*/list ([x width]
-                [y height])
-      (cons (cons x y)
-            (for/list ([dx (in-list (list (- x 1) x (+ x 1) x))]
-                       [dy (in-list (list y (- y 1) y (+ y 1)))]
-                          #:unless (or (< dx 0)
-                                       (< dy 0)
-                                       (>= dx width)
-                                       (>= dy height))
-                          #:when (eq? #\. (vector-ref (vector-ref gmap dy) dx)))
-                (cons dx dy)))))
-  (define graph (unweighted-graph/adj edges))
-  (game gmap players graph))
+  (game gmap players))
 
 (define test-state (read-map "day15_test.txt"))
+
+(define (game-ref game x y)
+  (vector-ref (vector-ref (game-map game) y) x))
+
+(define (occupied? game loc)
+  (dict-ref (game-players game) loc #f))
 
 (define (loc<=? l1 l2)
   (or
@@ -47,32 +41,51 @@
 (define (sort-players players)
   (sort players (lambda (p1 p2) (loc<=? (car p1) (car p2)))))
 
-(define (floor-square? game loc)
-  (and (>= (car loc) 0)
-       (>= (cdr loc) 0)
-       (< (car loc) (vector-length (game-map game)))
-       (< (cdr loc) (vector-length (vector-ref (game-map game) 0)))
-       (eq? (vector-ref (vector-ref (game-map game) (cdr loc)) (car loc)) #\.)))
+(define (adjacent game pos)
+  (define-values (x y) (values (car pos) (cdr pos)))
+  (for/list ([dy (in-list (list (- y 1) y y (+ y 1)))]
+             [dx (in-list (list x (- x 1) (+ x 1) x))]
+             #:unless (or (< dx 0)
+                          (< dy 0)
+                          (>= dx (vector-length (game-map game)))
+                          (>= dy (vector-length (vector-ref (game-map game) 0))))
+             #:when (eq? (game-ref game dx dy) #\.))
+    (cons dx dy)))
 
-(define (square-free? game loc)
-  (and (floor-square? game loc)
-       (not (dict-ref (game-players game) loc #f))))
+(define (find-move game player)
+  (define/match (step<=? a b)
+    [((cons loc1 dist1) (cons loc2 dist2)) (or (< dist1 dist2)
+                                               (and (= dist1 dist2)
+                                                    (loc<=? loc1 loc2)))])
+  (define goals (apply append (for/list ([o (opponents game player)])
+                                (adjacent game (car o)))))
+  (define todo (make-queue))
+  (define dists (make-hash (list (cons (car player) (cons #f 0)))))
+  (define seen (mutable-set))
+  (enqueue! todo (car player))
+  (let loop ()
+    (if (queue-empty? todo)
+        dists
+        (let ([sq (dequeue! todo)])
+          (for ([pos (adjacent game sq)]
+                #:unless (occupied? game pos)
+                #:unless (set-member? seen pos))
+            (enqueue! todo pos)
+            (match (hash-ref dists sq)
+              [(cons step dist) (hash-set! dists pos (cons (or step pos) (add1 dist)))])
+            (set-add! seen pos))
+          (loop))))
+  (define steps 
+    (sort 
+     (for/list ([t (in-list goals)]
+                #:when (hash-ref dists t #f))
+       (hash-ref dists t #f))
+     step<=?))
+  (if (empty? steps)
+      #f
+      (caar steps)))
 
-(define (adjacent game loc)
-  (define-values (x y) (values (car loc) (cdr loc)))
-  (define potential (list (cons       x (sub1 y))
-                          (cons (sub1 x)      y)
-                          (cons (add1 x)      y)
-                          (cons       x (add1 y))))
-  (filter (curry square-free? game) potential))
-
-(define (add-source game base-graph loc)
-  (define graph (graph-copy base-graph))
-  (for ([adj (in-list (adjacent game loc))])
-    (add-edge! graph loc adj))
-  graph)
-
-(define (targets game player)
+(define (opponents game player)
   (define type (cond
                  [(eq? (cdr player) #\E) #\G]
                  [(eq? (cdr player) #\G) #\E]))
@@ -80,52 +93,29 @@
             (eq? type (cdr p)))
           (game-players game)))
 
-(define (shortest-paths graph start)
-  (define-values (dists prevs) (dijkstra graph start))
-  (values dists
-          (for/hash ([(dest steps) (in-hash dists)]
-                     #:unless (not (hash-ref prevs dest)))
-            (values dest
-                    (for/fold ([square dest])
-                              ([rem (in-range 0 (sub1 steps))])
-                      (hash-ref prevs square))))))
-
-
-(define (routes game player)
-  (define/match (route<=? route1 route2)
-    [((cons dist1 loc1) (cons dist2 loc2)) (or
-                                            (< dist1 dist2)
-                                            (and (= dist1 dist2) (loc<=? loc1 loc2)))])
-  
-  (define graph (graph-copy (game-graph game)))
-  (for ([p (in-list (game-players game))]
-        #:unless (equal? player p))
-    (remove-vertex! graph  (car  p)))
-  
-  (define-values (dists nexts) (shortest-paths graph (car player)))
-  (define target-squares (apply append (map (compose (curry get-neighbors (game-graph game)) car)
-                                            (targets game player))))
-  (cdar
-   (sort 
-    (for/list ([ts (in-list target-squares)]
-               #:unless (eq? (hash-ref dists ts) +inf.0))
-      (cons (hash-ref dists ts) (hash-ref nexts ts #f)))
-    route<=?)))
-
 (define (in-range? game player)
-  (define adjs (get-neighbors (game-graph game) (car player)))
-  (ormap (compose (curry set-member? adjs) car) (targets game player)))
+  (define adjs (adjacent game (car player)))
+  (ormap (compose (curry set-member? adjs) car) (opponents game player)))
 
 
-(define (make-move old player)
-  (if (in-range? old player)
-      old
-      (let ([new-loc (routes game player)])
-        (struct-copy game old [players (cons ( ))]))))
+(define (update-loc game-state player loc)
+  (define new (cons loc (cdr player)))
+  (define players (cons new (dict-remove (game-players game-state) (car player))))
+  (struct-copy game game-state [players players]))
 
-(for/fold ([posns (hash)])
-          ([p (in-list (game-players test-state))])
-  (hash-set posns (routes test-state p) (cdr p)))
+(define (move-player game player)
+  (if (in-range? game player)
+      game
+      (let ([step (find-move game player)])
+        (if step
+            (update-loc game player step)
+            game))))
+
+(define (move-all state)
+  (for/fold ([state state])
+            ([p (sort-players (game-players state))])
+    (move-player state p)))
+
 
 (define (display-board game)
   (for ([row (in-vector (game-map game))]
