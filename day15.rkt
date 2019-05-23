@@ -4,6 +4,7 @@
          rackunit)
 
 (struct game (map players) #:transparent)
+(struct unit (pos type hp ap) #:transparent)
 
 (define (read-map fname)
   (define lines (file->lines fname))
@@ -18,7 +19,7 @@
         (cond
           [(or (eq? ch #\G)
                (eq? ch #\E)) (begin
-                               (set! players (cons (cons (cons x y) ch) players))
+                               (set! players (cons (unit (cons x y) ch 200 3) players))
                                #\.)]
           [else ch]))))
 
@@ -29,17 +30,17 @@
 (define (game-ref game x y)
   (vector-ref (vector-ref (game-map game) y) x))
 
-(define (occupied? game loc)
-  (dict-ref (game-players game) loc #f))
+(define (occupied? game pos)
+  (ormap (lambda (p) (equal? (unit-pos p) pos)) (game-players game)))
 
-(define (loc<=? l1 l2)
+(define (pos<=? p1 p2)
   (or
-   (< (cdr l1) (cdr l2))
-   (and (= (cdr l1) (cdr l2))
-        (<= (car l1) (car l2)))))
+   (< (cdr p1) (cdr p2))
+   (and (= (cdr p1) (cdr p2))
+        (<= (car p1) (car p2)))))
 
 (define (sort-players players)
-  (sort players (lambda (p1 p2) (loc<=? (car p1) (car p2)))))
+  (sort players (lambda (p1 p2) (pos<=? (unit-pos p1) (unit-pos p2)))))
 
 (define (adjacent game pos)
   (define-values (x y) (values (car pos) (cdr pos)))
@@ -54,15 +55,15 @@
 
 (define (find-move game player)
   (define/match (step<=? a b)
-    [((cons loc1 dist1) (cons loc2 dist2)) (or (< dist1 dist2)
+    [((cons pos1 dist1) (cons pos2 dist2)) (or (< dist1 dist2)
                                                (and (= dist1 dist2)
-                                                    (loc<=? loc1 loc2)))])
+                                                    (pos<=? pos1 pos2)))])
   (define goals (apply append (for/list ([o (opponents game player)])
-                                (adjacent game (car o)))))
+                                (adjacent game (unit-pos o)))))
   (define todo (make-queue))
-  (define dists (make-hash (list (cons (car player) (cons #f 0)))))
+  (define dists (make-hash (list (cons (unit-pos player) (cons #f 0)))))
   (define seen (mutable-set))
-  (enqueue! todo (car player))
+  (enqueue! todo (unit-pos player))
   (let loop ()
     (if (queue-empty? todo)
         dists
@@ -87,28 +88,35 @@
 
 (define (opponents game player)
   (define type (cond
-                 [(eq? (cdr player) #\E) #\G]
-                 [(eq? (cdr player) #\G) #\E]))
+                 [(eq? (unit-type player) #\E) #\G]
+                 [(eq? (unit-type player) #\G) #\E]))
   (filter (lambda (p)
-            (eq? type (cdr p)))
+            (eq? type (unit-type p)))
           (game-players game)))
 
 (define (in-range? game player)
-  (define adjs (adjacent game (car player)))
-  (ormap (compose (curry set-member? adjs) car) (opponents game player)))
+  (define adjs (adjacent game (unit-pos player)))
+  (ormap (compose (curry set-member? adjs) unit-pos) (opponents game player)))
 
+(define (in-range game player)
+  (define adjs (adjacent game (unit-pos player)))
+  (sort
+   (filter (compose (curry set-member? adjs) unit-pos) (opponents game player))
+   (lambda (p1 p2) (pos<=? (unit-pos p1) (unit-pos p2)))))
 
-(define (update-loc game-state player loc)
-  (define new (cons loc (cdr player)))
-  (define players (cons new (dict-remove (game-players game-state) (car player))))
-  (struct-copy game game-state [players players]))
+(define (set-unit-pos state player pos)
+  (define players (for/list ([p (game-players state)])
+                    (if (eq? p player)
+                        (struct-copy unit player [pos pos])
+                        p)))
+  (struct-copy game state [players players] ))
 
 (define (move-player game player)
   (if (in-range? game player)
       game
       (let ([step (find-move game player)])
         (if step
-            (update-loc game player step)
+            (set-unit-pos game player step)
             game))))
 
 (define (move-all state)
@@ -116,14 +124,16 @@
             ([p (sort-players (game-players state))])
     (move-player state p)))
 
-
 (define (display-board game)
+  (define players (for/hash ([p (game-players game)])
+                    (values (unit-pos p) (unit-type p))))
   (for ([row (in-vector (game-map game))]
         [y (in-naturals)])
     (for ([square (in-vector row)]
           [x (in-naturals)])
-      (define p (dict-ref (game-players game) (cons x y) #f))
+      (define p (hash-ref players (cons x y) #f))
       (if p
           (display p)
           (display square)))
     (displayln "")))
+
