@@ -6,8 +6,8 @@
 (struct game (map [players #:mutable]) #:transparent)
 (struct unit (pos type hp ap) #:transparent #:mutable)
 
-(define (read-map fname)
-  (define lines (file->lines fname))
+(define (read-map fname-or-lines)
+  (define lines (if (string? fname-or-lines) (file->lines fname-or-lines) fname-or-lines))
   (define height (length lines))
   (define width (string-length (car lines)))
   (define players '())
@@ -25,6 +25,88 @@
 
   (game gmap players))
 
+
+
+(module+ test
+  (define test (read-map (list "#########"
+                               "#G..G..G#"
+                               "#.......#"
+                               "#.......#"
+                               "#G..E..G#"
+                               "#.......#"
+                               "#.......#"
+                               "#G..G..G#"
+                               "#########")))
+  (let-values ([(rounds hp score) (play! test +inf.0)])
+    (check-eq? rounds 18)
+    (check-eq? hp 1546))
+  
+  (define test2 (read-map (list "#######"   
+                                "#.G...#"
+                                "#...EG#"
+                                "#.#.#G#"
+                                "#..G#E#"
+                                "#.....#"   
+                                "#######")))
+  (let-values ([(rounds hp score) (play! test2 +inf.0)])
+    (check-eq? score 27730))
+  
+  (define test3 (read-map (list "#######"
+                                "#G..#E#"
+                                "#E#E.E#"
+                                "#G.##.#"
+                                "#...#E#"
+                                "#...E.#"
+                                "#######")))
+  (let-values ([(rounds hp score) (play! test3 +inf.0)])
+    (check-eq? score 36334))
+  
+  (define test4 (read-map (list "#######"
+                                "#E..EG#"
+                                "#.#G.E#"
+                                "#E.##E#"
+                                "#G..#.#"
+                                "#..E#.#"
+                                "#######")))
+  (let-values ([(rounds hp score) (play! test4 +inf.0)])
+    (check-eq? score 39514))
+    
+  (define test5 (read-map (list "#######"
+                                "#E.G#.#"
+                                "#.#G..#"
+                                "#G.#.G#"
+                                "#G..#.#"
+                                "#...E.#"
+                                "#######")))
+  (let-values ([(rounds hp score) (play! test5 +inf.0)])
+    (check-eq? score 27755))
+  
+  (define test6 (read-map (list "#######"
+                                "#.E...#"
+                                "#.#..G#"
+                                "#.###.#"
+                                "#E#G#G#"
+                                "#...#G#"
+                                "#######")))
+  (let-values ([(rounds hp score) (play! test6 +inf.0)])
+    (check-eq? score 28944))
+  
+  (define test7 (read-map (list "#########"
+                                "#G......#"
+                                "#.E.#...#"
+                                "#..##..G#"
+                                "#...##..#"
+                                "#...#...#"
+                                "#.G...G.#"
+                                "#.....G.#"
+                                "#########")))
+    (let-values ([(rounds hp score) (play! test7 +inf.0)])
+      (check-eq? score 18740))
+
+    (define test8 (read-map "day15_input.txt"))
+    (let-values ([(rounds hp score) (play! test8 +inf.0)])
+      (check-eq? score 191216)))
+
 (define test-state (read-map "day15_test.txt"))
 
 (define (game-ref game x y)
@@ -35,7 +117,7 @@
 
 (define (pos<=? p1 p2)
   (or
-   (< (cdr p1) (cdr p2))
+   (< (cdr p1) (cdr p2))nn
    (and (= (cdr p1) (cdr p2))
         (<= (car p1) (car p2)))))
 
@@ -89,6 +171,7 @@
       #f
       (match (car steps)
         [(list t step dist) step])))
+
 
 (define (opponents game player)
   (define type (cond
@@ -184,4 +267,5 @@
   (printf "Turn ~a~%" rounds)
   (display-board state)
   (define total-hp (for/sum ([p (game-players state)]) (unit-hp p)))
-  (printf "Rounds: ~a HP: ~a Score: ~a~%" rounds total-hp (* rounds total-hp)))
+  (printf "Rounds: ~a HP: ~a Score: ~a~%" rounds total-hp (* rounds total-hp))
+  (values rounds total-hp (* rounds total-hp)))
