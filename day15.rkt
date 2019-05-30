@@ -3,14 +3,14 @@
          data/queue
          rackunit)
 
-(struct game (map [players #:mutable]) #:transparent)
-(struct unit (pos type hp ap) #:transparent #:mutable)
+(struct game (map players) #:transparent)
+(struct unit (type hp ap) #:transparent #:mutable)
 
 (define (read-map fname-or-lines)
   (define lines (if (string? fname-or-lines) (file->lines fname-or-lines) fname-or-lines))
   (define height (length lines))
   (define width (string-length (car lines)))
-  (define players '())
+  (define players (make-hash))
   (define gmap
     (for/vector ([l (in-list lines)]
                  [y (in-naturals)])
@@ -19,13 +19,11 @@
         (cond
           [(or (eq? ch #\G)
                (eq? ch #\E)) (begin
-                               (set! players (cons (unit (cons x y) ch 200 3) players))
+                               (hash-set! players (cons x y) (unit ch 200 3))
                                #\.)]
           [else ch]))))
 
   (game gmap players))
-
-
 
 (module+ test
   (define test (read-map (list "#########"
@@ -49,6 +47,8 @@
                                 "#.....#"   
                                 "#######")))
   (let-values ([(rounds hp score) (play! test2 +inf.0)])
+    (check-eq? hp 590)
+    (check-eq? rounds 47)
     (check-eq? score 27730))
   
   (define test3 (read-map (list "#######"
@@ -112,17 +112,24 @@
 (define (game-ref game x y)
   (vector-ref (vector-ref (game-map game) y) x))
 
-(define (occupied? game pos)
-  (ormap (lambda (p) (equal? (unit-pos p) pos)) (game-players game)))
-
 (define (pos<=? p1 p2)
   (or
-   (< (cdr p1) (cdr p2))nn
+   (< (cdr p1) (cdr p2))
    (and (= (cdr p1) (cdr p2))
         (<= (car p1) (car p2)))))
 
-(define (sort-players players)
-  (sort players (lambda (p1 p2) (pos<=? (unit-pos p1) (unit-pos p2)))))
+(define (sort-players game)
+  (sort (hash-keys (game-players game)) pos<=?))
+
+(define test (read-map (list "#########"
+                               "#G..G..G#"
+                               "#.......#"
+                               "#.......#"
+                               "#G..E..G#"
+                               "#.......#"
+                               "#.......#"
+                               "#G..G..G#"
+                               "#########")))
 
 (define (adjacent game pos)
   (define-values (x y) (values (car pos) (cdr pos)))
@@ -135,122 +142,112 @@
              #:when (eq? (game-ref game dx dy) #\.))
     (cons dx dy)))
 
-(define (find-move game player)
+(define (find-move game pos player)
   (define/match (step<=? a b)
     [((list g1 pos1 dist1) (list g2 pos2 dist2)) (or (< dist1 dist2)
                                                      (and (= dist1 dist2)
                                                           (or (pos<=? g1 g2)
                                                               (and (equal? g1 g2)
                                                                    (pos<=? pos1 pos2)))))])
-  (define goals (apply append (for/list ([o (opponents game player)])
-                                (adjacent game (unit-pos o)))))
+
+  (define enemy-squares (list->set
+                         (apply append
+                                (for/list ([(pt en) (in-hash (game-players game))]
+                                           #:when (not (eq? (unit-type en) (unit-type player))))
+                                  (adjacent game pt)))))
+ 
+  
   (define todo (make-queue))
-  (define dists (make-hash (list (cons (unit-pos player) (cons #f 0)))))
-  (define seen (mutable-set))
-  (enqueue! todo (unit-pos player))
-  (let loop ()
-    (if (queue-empty? todo)
-        dists
-        (let ([sq (dequeue! todo)])
-          (for ([pos (adjacent game sq)]
-                #:unless (occupied? game pos)
-                #:unless (set-member? seen pos))
-            (enqueue! todo pos)
-            (match (hash-ref dists sq)
-              [(cons step dist) (hash-set! dists pos (cons (or step pos) (add1 dist)))])
-            (set-add! seen pos))
-          (loop))))
-  (define steps 
-    (sort 
-     (for/list ([t (in-list goals)]
-                #:when (hash-ref dists t #f))
-       (match (hash-ref dists t #f)
-         [(cons step dist) (list t step dist)]))
-     step<=?))
-  (if (empty? steps)
-      #f
-      (match (car steps)
-        [(list t step dist) step])))
+  (define dists (make-hash (list (cons pos 0))))
+  (define steps (make-hash))
+  
+  (define (add-adjacents! sq)
+    (for ([pos (adjacent game sq)]
+          #:unless (hash-has-key? (game-players game) pos)
+          #:unless (hash-has-key? dists pos))
+      (enqueue! todo pos)
+      (define distance (hash-ref dists sq))
+      (define step (hash-ref steps sq pos))
+      (hash-set! dists pos (add1 distance))
+      (hash-set! steps pos step)))
+  
+  (enqueue! todo pos)
+  (let loop ([found #f]
+             [best-dist +inf.0])
+    (if (or (queue-empty? todo) (set-empty? enemy-squares))
+        ;; Stop when all squares are visited or all enemy-squares are looked at
+        (hash-ref steps found pos)
+        (let* ([sq (dequeue! todo)]
+               [sq-dist (hash-ref dists sq)])
+          (if (and found (> sq-dist best-dist))
+              ;; Stop when distance > best distance
+              (hash-ref steps found pos)
+              (let ()
+                (add-adjacents! sq)
+                (if (and (set-member? enemy-squares sq)
+                         (or (not found)
+                             (pos<=? sq found)))
+                    (loop sq sq-dist)
+                    (loop found best-dist))))))))
 
-
-(define (opponents game player)
-  (define type (cond
-                 [(eq? (unit-type player) #\E) #\G]
-                 [(eq? (unit-type player) #\G) #\E]))
-  (filter (lambda (p)
-            (eq? type (unit-type p)))
-          (game-players game)))
-
-(define (in-range? game player)
-  (define adjs (adjacent game (unit-pos player)))
-  (ormap (compose (curry set-member? adjs) unit-pos) (opponents game player)))
-
-(define (in-range game player)
-  (define adjs (adjacent game (unit-pos player)))
-  (sort
-   (filter (compose (curry set-member? adjs) unit-pos) (opponents game player))
-   (lambda (p1 p2) (pos<=? (unit-pos p1) (unit-pos p2)))))
-
-
-(define (move-player! game player)
-  (if (empty? (opponents game player))
-      #f
-      (begin
-        (when (not (in-range? game player))
-          (let ([step (find-move game player)])
-            (when step
-              (set-unit-pos! player step))))
-        (attack! game player)
-        #t)))
+(define (move-player! game pos)
+  (define player (hash-ref (game-players game) pos))
+  (define step (find-move game pos player))
+  (when (not (equal? pos step))
+    (hash-remove! (game-players game) pos)
+    (hash-set! (game-players game) step player))
+  (attack! game step player))
 
 (define (move-all! state)
-  (let loop ([players (sort-players (game-players state))])
-    (if (empty? players)
-        #t
-        (let ([p (car players)])
-          (if (> (unit-hp p) 0)
-              (if (move-player! state p)
-                  (loop (cdr players))
-                  #f)
-              (loop (cdr players)))))))
+  (let loop ([players (sort-players state)])
+    (cond
+      [(empty? players) #t]
+      [(finished? state) #f]
+      [else 
+       (let* ([pt (car players)]
+              [plr (hash-ref (game-players state) pt #f)])
+         (when plr
+           (move-player! state pt))
+         (loop (cdr players)))])))
 
-(define (attack! game player)
-  (define adjs (adjacent game (unit-pos player)))
-  (define enemies (sort
-                   (filter (compose (curry set-member? adjs) unit-pos) (opponents game player))
-                   (lambda (p1 p2)
-                     (or (< (unit-hp p1) (unit-hp p2))
-                         (and (= (unit-hp p1) (unit-hp p2))
-                              (pos<=? (unit-pos p1) (unit-pos p2)))))))
-  (when (not (empty? enemies))
-    (let* ([enemy (car enemies)]
-           [hp (unit-hp enemy)]
+(define (attack! game pos player)
+  (define-values (enemy-pos enemy)
+    (for/fold ([ep #f]
+               [en #f])
+              ([sq (in-list (adjacent game pos))])
+      (define unit (hash-ref (game-players game) sq #f))
+      (if (and unit
+               (not (eq? (unit-type unit) (unit-type player)))
+               (or (not ep) (< (unit-hp unit) (unit-hp en))))
+          (values sq unit)
+          (values ep en))))
+  (when enemy
+    (let* ([hp (unit-hp enemy)]
            [new-hp (- hp (unit-ap player))])
-      ;; (printf "Attacking ~a(~a,~a) ~a->~a~%"
-      ;;         (unit-type enemy) (car (unit-pos enemy)) (cdr (unit-pos enemy))
-      ;;         hp new-hp)
       (set-unit-hp! enemy new-hp)
       (when (<= new-hp 0)
-        (set-game-players! game (remove enemy (game-players game)))))))
+        (hash-remove! (game-players game) enemy-pos)))))
 
 (define (display-board game)
-  (define players (for/hash ([p (game-players game)])
-                    (values (unit-pos p) (unit-type p))))
   (for ([row (in-vector (game-map game))]
         [y (in-naturals)])
     (for ([square (in-vector row)]
           [x (in-naturals)])
-      (define p (hash-ref players (cons x y) #f))
-      (if p
-          (display p)
+      (define plr (hash-ref (game-players game) (cons x y) #f))
+      (if plr
+          (display (unit-type plr))
           (display square)))
-    (for ([p (in-list (sort-players (game-players game)))]
-          #:when (= (cdr (unit-pos p)) y))
-      (printf " ~a(~a)" (unit-type p) (unit-hp p)))
+    (for ([pt (in-list (sort (hash-keys (game-players game)) pos<=?))]
+          #:when (= (cdr pt) y))
+      (define plr (hash-ref (game-players game) pt))
+      (printf " ~a(~a)" (unit-type plr) (unit-hp plr)))
     (displayln "")))
 
-(define test (read-map "day15_test7.txt"))
-(define input (read-map "day15_input.txt"))
+(define (finished? state)
+  (define players (hash-values (game-players state)))
+  (andmap (lambda (p) (eq? (unit-type (car players))
+                           (unit-type p)))
+          (cdr players)))
 
 (define (play! state [n 1] #:show [show #f])
   (define rounds 
@@ -266,6 +263,6 @@
                 i)))))
   (printf "Turn ~a~%" rounds)
   (display-board state)
-  (define total-hp (for/sum ([p (game-players state)]) (unit-hp p)))
+  (define total-hp (for/sum ([(_ p) (in-hash (game-players state))]) (unit-hp p)))
   (printf "Rounds: ~a HP: ~a Score: ~a~%" rounds total-hp (* rounds total-hp))
   (values rounds total-hp (* rounds total-hp)))
