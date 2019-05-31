@@ -266,3 +266,77 @@
   (define total-hp (for/sum ([(_ p) (in-hash (game-players state))]) (unit-hp p)))
   (printf "Rounds: ~a HP: ~a Score: ~a~%" rounds total-hp (* rounds total-hp))
   (values rounds total-hp (* rounds total-hp)))
+
+(define (attack/godmode! game pos player)
+  (define-values (enemy-pos enemy)
+    (for/fold ([ep #f]
+               [en #f])
+              ([sq (in-list (adjacent game pos))])
+      (define unit (hash-ref (game-players game) sq #f))
+      (if (and unit
+               (not (eq? (unit-type unit) (unit-type player)))
+               (or (not ep) (< (unit-hp unit) (unit-hp en))))
+          (values sq unit)
+          (values ep en))))
+  (when enemy
+    (let* ([hp (unit-hp enemy)]
+           [new-hp (- hp (unit-ap player))])
+      (set-unit-hp! enemy new-hp)
+      (when (<= new-hp 0)
+        (if (eq? (unit-type enemy) #\E)
+            (raise 'dead)
+            (hash-remove! (game-players game) enemy-pos))))))
+
+(define (move-player/godmode! game pos)
+  (define player (hash-ref (game-players game) pos))
+  (define step (find-move game pos player))
+  (when (not (equal? pos step))
+    (hash-remove! (game-players game) pos)
+    (hash-set! (game-players game) step player))
+  (attack/godmode! game step player))
+
+(define (move-all/godmode! state)
+  (let loop ([players (sort-players state)])
+    (cond
+      [(empty? players) #t]
+      [(finished? state) #f]
+      [else 
+       (let* ([pt (car players)]
+              [plr (hash-ref (game-players state) pt #f)])
+         (when plr
+           (move-player/godmode! state pt))
+         (loop (cdr players)))])))
+
+(define (game-copy base [ap 3])
+  (define player-copy (make-hash))
+  (for ([(pt pl) (in-hash (game-players base))])
+    (if (eq? (unit-type pl) #\E)
+        (hash-set! player-copy pt (struct-copy unit pl [ap ap]))
+        (hash-set! player-copy pt (struct-copy unit pl))))
+  (struct-copy game base [players player-copy]))
+
+(define (play/godmode! base #:show [show #f])
+  (define-values (state rounds)
+    (let manager ([ap 4])
+      (define state (game-copy base ap))
+      (with-handlers
+        ([(lambda (e) (eq? e 'dead)) (lambda (e)
+                                       (manager (add1 ap)))])
+        (let loop ([i 0])
+          (begin
+            (when show
+              (printf "Turn ~a~%" i)
+              (display-board state))
+            (if (move-all/godmode! state)
+                (loop (add1 i))
+                (values state i)))))))
+  (printf "Turn ~a~%" rounds)
+  (display-board state)
+  (define total-hp (for/sum ([(_ p) (in-hash (game-players state))]) (unit-hp p)))
+  (printf "Rounds: ~a HP: ~a Score: ~a~%" rounds total-hp (* rounds total-hp))
+  (values rounds total-hp (* rounds total-hp)))
+
+(module+ test
+  (define test9 (read-map "day15_input.txt"))
+  (let-values ([(rnds hp score) (play/godmode! test9)])
+    (check-eq? score 48050)))
