@@ -15,11 +15,11 @@
 (struct field (x-offset y-offset x-max y-max squares) #:transparent)
 
 (define (field-ref field x y)
-  (vector-ref (vector-ref (field-squares field) (- y (field-y-offset field)))
+  (vector-ref (vector-ref (field-squares field) y)
               (- x (field-x-offset field))))
 
 (define (field-set! field x y val)
-  (vector-set! (vector-ref (field-squares field) (- y (field-y-offset field)))
+  (vector-set! (vector-ref (field-squares field) y)
                (- x (field-x-offset field))
                val))
 
@@ -39,87 +39,68 @@
                         (for*/list ([x (in-range (car xs) (cdr xs))]
                                     [y (in-range (car ys) (cdr ys))])
                           (cons x y)))))
-  (define x-offset (car (argmin car clay)))
-  (define y-offset (min 0 (cdr (argmin cdr clay))))
-  (define x-max (car (argmax car clay)))
+  (define x-offset (sub1 (car (argmin car clay))))
+  (define y-offset (cdr (argmin cdr clay)))
+  (define x-max (add1 (car (argmax car clay))))
   (define y-max (cdr (argmax cdr clay)))
   (define squares
-    (for/vector ([y (in-range (add1 (- y-max y-offset)))])
+    (for/vector ([y (in-range (add1 y-max))])
       (make-vector (add1 (- x-max x-offset)) #\.)))
   (for ([sq (in-list clay)])
-    (vector-set! (vector-ref squares (- (cdr sq) y-offset)) (- (car sq) x-offset) #\#))
-  (vector-set! (vector-ref squares (- 0 y-offset)) (- 500 x-offset) #\+)
+    (vector-set! (vector-ref squares (cdr sq)) (- (car sq) x-offset) #\#))
+  (vector-set! (vector-ref squares 0) (- 500 x-offset) #\+)
   (field x-offset y-offset x-max y-max squares))
-
-(define (wall-to-wall? field x y)
-  (displayln "In wall to wall")
-  (and
-    (let left ([x x])
-      (cond
-        [(<= x (field-x-offset field)) #f]
-        [(>= y (field-y-max field)) #f]
-        [(eqv? (field-ref field x (add1 y)) #\.) #f]
-        [(eqv? (field-ref field (sub1 x) y) #\#)  #t]
-        [(eqv? (field-ref field (sub1 x) y) #\~)  #t]
-        [else (left (sub1 x))]))
-    (let right ([x x])
-      (cond
-        [(>= x (field-x-max field))  #f]
-        [(>= y (field-y-max field))  #f]
-        [(eqv? (field-ref field x (add1 y)) #\.)  #f]
-        [(eqv? (field-ref field (add1 x) y) #\#)  #t]
-        [(eqv? (field-ref field (add1 x) y) #\~)  #t]
-        [else (right (add1 x))]))))
-
-(define (dfs! field x y)
-  (printf "~a, ~a~%" x y)
-  (display-field field)
-  (define res
-    (cond
-      ;; Is the current square solid?
-      [(< x (field-x-offset field)) #f]
-      [(> x (field-x-max field)) #f]
-      [(< y (field-y-offset field)) #f]
-      [(> y (field-y-max field)) (displayln "Off screen!") #f]
-      [(eqv? (field-ref field x y) #\#) #t]
-      [(eqv? (field-ref field x y) #\~) #t]
-      [else (field-set! field x y #\|)
-            (if (dfs! field x (add1 y))
-                (let ()
-                  ;; (when (wall-to-wall? field x y)
-                  ;;   (field-set! field x y #\~))
-                  (dfs! field (sub1 x) y)
-                  ;; (dfs! field (add1 x) y)
-                  #t)
-                #f)]))
-  res)
 
 (define (display-field field)
   (for ([row (in-vector (field-squares field))]
         [i (in-naturals)])
-    (display (~a i #:min-width 2 #:align 'right))
+    (display (~a i #:min-width 4 #:align 'right))
     (display " ")
     (for ([sq (in-vector row)])
       (display (string sq)))
     (displayln "")))format
 
-(define test (parse-input input))
-
-(define (push-water field x y [dir 'left])
-  (printf "Pushing ~a,~a~%" x y)
+(define (flow field x y [dir 0])
+  (when (eqv? (field-ref field x y) #\.)
+    (field-set! field x y #\|))
   (cond
-    [(< x (field-x-offset field)) #t]
-    [(> x (field-x-max field)) #t]
-    [(< y (field-y-offset field)) #t]
-    [(> y (field-y-max field)) (displayln "Off screen!") #t]
-    [(eqv? (field-ref field x y) #\#) #f]
-    [(and (eqv? dir 'left)
-          (eqv? (field-ref field x y) #\~)) (or (push-water field (sub1 x) y 'left)
-                                                (push-water field (add1 x) y 'right))]
-    [(eqv? (field-ref field x y) #\~) (push-water field (add1 x) y 'right)]
-    [(push-water field x (add1 y)) (field-set! field x y #\|) #t]
-    [else (field-set! field x y #\~) #t]))
+    [(= y (field-y-max field)) #f]
+    [(eqv? (field-ref field x y) #\#) x]
+    [(eqv? (field-ref field x (add1 y)) #\.) (flow field x (add1 y) 0)
+                                             (flow field x y dir)]
+    [(set-member? (set #\# #\~) (field-ref field x (add1 y)))
+     (if (zero? dir)
+         (let ([left (flow field (sub1 x) y -1)]
+               [right (flow field (add1 x) y 1)])
+           (when (and (eqv? (field-ref field left y) #\#)
+                      (eqv? (field-ref field right y) #\#))
+             (for ([x (in-range (add1 left) right)])
+               (field-set! field x y #\~)))
+           #f)
+         (flow field (+ x dir) y dir))]
+    [else x]))
 
-(for ([i (in-range 5)])
-  (push-water test 500 1)
-  (display-field test))
+(define (count-water field)
+  (flow field 500 1)
+  (define water (set #\| #\~))
+  (define-values (running standing)
+    (for*/fold ([running 0]
+                [standing 0])
+               ([row (in-vector (vector-drop (field-squares field) (field-y-offset field)))]
+                [sq (in-vector row)])
+      (cond
+        [(eqv? sq #\~) (values running (add1 standing))]
+        [(eqv? sq #\|) (values (add1 running) standing)]
+        [else (values running standing)])))
+  (values running standing (+ running standing)))
+
+(module+ test
+  (define test (parse-input input))
+  (let-values ([(r s t) (count-water test)])
+    (check-eq? t 57))
+
+  (define test2 (parse-input (file->lines "day17_input.txt")))
+  (let-values ([(r s t) (count-water test2)])
+    (check-eq? t 52800)
+    (check-eq? s 45210)))
+
