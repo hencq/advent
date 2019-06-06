@@ -201,31 +201,26 @@
   (vector-set! regs 2 (bitwise-and r2** 16777215)))
 
 ;; Translate the program into Racket code based on the program->asm output
-(define (program [r0 0])
-  (define-values (r1 r2 r3 r4 r5) (values 0 0 0 0 0))
-  (let label6 ([seen (set)]
-               [last #f])
-    (set! r5 (bitwise-ior r2 65536))
-    (set! r2 5234604)
-    (let label8 ()
-      (set! r3 (bitwise-and r5 255))
-      (set! r2 (+ r2 r3))
-      (set! r2 (bitwise-and r2 16777215))
-      (set! r2 (* r2 65899))
-      (set! r2 (bitwise-and r2 16777215))
-      (if (> 256 r5)
-          (let label28 ()
-            (if (set-member? seen r2)
-                last
-                (if (= r2 r0)
-                    r0
-                    (label6 (set-add seen r2) r2))))
-          (let label18 ([l3 0])
-            (if (> (* (add1 l3) 256) r5)
-                (let label26 ()
-                  (set! r5 l3)
-                  (label8))
-                (label18 (add1 l3))))))))
+(define (program [target 0] #:part [part 1])
+  (let outer ([seen (set)]
+               [last 0])
+    (let inner ([l5 (bitwise-ior last 65536)]
+                [l2 5234604])
+      (define result (bitwise-and (* (bitwise-and
+                                      (+ l2 (bitwise-and l5 255))
+                                      16777215)
+                                     65899)
+                                  16777215))
+      (if (<= l5 256)
+          (cond
+            [(= part 1) result]
+            [(= part 2) 
+             (if (set-member? seen result)
+                 last
+                 (if (= result target)
+                     target
+                     (outer (set-add seen result) result)))])
+          (inner (quotient l5 256) result)))))
 
 (define (if->when program)
   (let loop ([todo program]
