@@ -203,9 +203,8 @@
 ;; Translate the program into Racket code based on the program->asm output
 (define (program [r0 0])
   (define-values (r1 r2 r3 r4 r5) (values 0 0 0 0 0))
-  (define seen (mutable-set))
-  (define last #f)
-  (let label6 ()
+  (let label6 ([seen (set)]
+               [last #f])
     (set! r5 (bitwise-ior r2 65536))
     (set! r2 5234604)
     (let label8 ()
@@ -218,12 +217,9 @@
           (let label28 ()
             (if (set-member? seen r2)
                 last
-                (let ()
-                  (set! last r2)
-                  (set-add! seen r2)
-                  (if (= r2 r0)
-                      r0
-                      (label6)))))
+                (if (= r2 r0)
+                    r0
+                    (label6 (set-add seen r2) r2))))
           (let label17 ()
             (set! r3 0)
             (let label18 ()
