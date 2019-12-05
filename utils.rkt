@@ -1,6 +1,7 @@
 #lang racket
 
-(require rackunit)
+(require rackunit
+         racket/struct)
 
 (define (take-upto lst pos)
   (with-handlers
@@ -61,10 +62,19 @@
   (check-equal? (partition-by (list 1 2 3 4 5) (curry = 3)) '((1 2) (3) (4 5))))
 
 
-;; Deque implementation
+;; === Deque ===
+
+;; A simple deque implemented as a linked list
+;; It can be used as a regular queue or a stack
+;; It also supports a rotate operation to use it as a ring
 
 (struct Node (prev next val) #:mutable #:transparent)
-(struct Deque (head tail) #:mutable #:transparent)
+(struct Deque (head tail) #:mutable
+  #:methods gen:custom-write
+  [(define write-proc
+     (make-constructor-style-printer
+      (lambda (obj) 'deque)
+      (lambda (obj) (deque->list obj))))])
 
 (define (deque . xs)
   (if (empty? xs)
@@ -130,7 +140,7 @@
     (push-end! dq x))
   dq)
 
-(define (rotate! dq n)
+(define (rotate! dq [n 1])
   (cond
     [(= n 0) (void)]
     [(> n 0) (for ([i (in-range n)])
