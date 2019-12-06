@@ -3,6 +3,23 @@
 (require rackunit
          racket/struct)
 
+(provide
+ take-upto
+ drop-upto
+ partition
+ partition-by
+ deque
+ deque-empty?
+ pop-front!
+ peek-front
+ push-front!
+ pop-end!
+ peek-end
+ push-end!
+ rotate!
+ deque->list
+ list->deque)
+
 (define (take-upto lst pos)
   (with-handlers
     ([exn:fail:contract? (lambda (e) lst)])
@@ -80,6 +97,9 @@
   (if (empty? xs)
       (Deque #f #f)
       (list->deque xs)))
+
+(define (deque-empty? dq)
+  (not (Deque-head dq)))
 
 (define (push-front! dq x)
   (let* ([old (Deque-head dq)]
