@@ -3,12 +3,9 @@
 (require rackunit
          "../intcode.rkt")
 
-(define input (file->string "input5.txt"))
+(define input (new-prog (file->string "input5.txt")))
 
-(define (in) 1)
-(define (out x) (printf "> ~a~%" x))
+(run! input '(1))
 
-(run input in out)
-
-(define (provide-id) 5)
-(run input provide-id out)
+(restart! input)
+(run! input '(5))

@@ -2,7 +2,11 @@
 
 (require rackunit)
 
-(provide run!)
+(provide new-prog
+         run!
+         restart!
+         set-prog-pc!
+         prog-done)
 
 ;; Some intcode utilities to (hopefully) help with later puzzles
 
@@ -33,7 +37,7 @@
   (define reg-map (for/hash ([c (in-list regs)]
                              [i (in-naturals (+ code-len (length consts)))])
                     (values c i)))
-n  (append
+  (append
    (for/list ([c (in-list code)])
      (cond
        [(eq? c 'add) 1]
@@ -64,13 +68,13 @@ n  (append
 
 ;; Running intcode
 
-(struct prog (instrs pc done) #:mutable #:transparent)
+(struct prog (uninit instrs pc done) #:mutable #:transparent)
 
 (define (new-prog instrs)
   (cond
     [(list? instrs) (set! instrs (list->vector instrs))]
     [(string? instrs) (set! instrs (string->ivector instrs))])
-  (prog instrs 0 #f))
+  (prog instrs (vector-copy instrs) 0 #f))
 
 (define (string->ivector input)
   (list->vector
@@ -78,6 +82,7 @@ n  (append
 
 (define (restart! p)
   (set-prog-pc! p 0)
+  (set-prog-instrs! p (vector-copy (prog-uninit p)))
   (set-prog-done! p #f))
 
 (define (get-cell p pc)
@@ -137,23 +142,28 @@ n  (append
 
 (define (inp! p in)
   (vector-set! (prog-instrs p) (get-param p 1) (car in))
-  (set-prog-pc! p (+ (prog-pc p) 2)))
+  (set-prog-pc! p (+ (prog-pc p) 2))
+  (cdr in))
 
 (define (out! p out)
   (define res (cons (get-param-val p 1) out))
   (set-prog-pc! p (+ (prog-pc p) 2))
   res)
 
-(define (run! prog [input '()])
+(define (run! prog [input '()] #:debug [debug #f])
   (let loop ([in input]
              [out '()])
     (define op (opcode prog))
+    (when debug
+      (printf ">~a (~a)~%" op in))
     (cond
       [(prog-done prog) (void)]
       [(= op 99) (set-prog-done! prog #t) (reverse out)]
       [(= op 1) (add! prog) (loop in out)]
       [(= op 2) (mul! prog) (loop in out)]
-      [(= op 3) (inp! prog in) (loop (cdr in) out)]
+      [(= op 3) (if (empty? in)
+                    (reverse out)
+                    (loop (inp! prog in) out))]
       [(= op 4) (loop in (out! prog out))]
       [(= op 5) (jnz! prog) (loop in out)]
       [(= op 6) (jiz! prog) (loop in out)]
