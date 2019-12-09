@@ -93,7 +93,8 @@
 (define (restart! p)
   (set-prog-pc! p 0)
   (set-prog-rb! p 0)
-  (set-prog-instrs! p (vector-copy (prog-uninit p)))
+  (vector-fill! (prog-instrs p) 0)
+  (vector-copy! (prog-instrs p) 0 (prog-uninit p))
   (set-prog-done! p #f))
 
 (define (get-cell p i)
