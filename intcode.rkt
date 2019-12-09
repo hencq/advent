@@ -68,40 +68,71 @@
 
 ;; Running intcode
 
-(struct prog (uninit instrs pc done) #:mutable #:transparent)
+(struct prog (uninit instrs pc rb done) #:mutable #:transparent)
 
 (define (new-prog instrs)
   (cond
     [(list? instrs) (set! instrs (list->vector instrs))]
     [(string? instrs) (set! instrs (string->ivector instrs))])
-  (prog instrs (vector-copy instrs) 0 #f))
+  (define size (expt 2 (+ 2
+                          (inexact->exact (floor (log (vector-length instrs) 2))))))
+  (define prog-vec (make-vector size))
+  (vector-copy! prog-vec 0 instrs)
+  (prog instrs prog-vec 0 0 #f))
 
 (define (string->ivector input)
   (list->vector
    (map (compose string->number string-trim) (string-split input ","))))
 
+(define (double-memory! p)
+  (define cur-size (vector-length (prog-instrs p)))
+  (define new-vec (make-vector (* 2 cur-size)))
+  (vector-copy! new-vec 0 (prog-instrs p))
+  (set-prog-instrs! p new-vec))
+
 (define (restart! p)
   (set-prog-pc! p 0)
+  (set-prog-rb! p 0)
   (set-prog-instrs! p (vector-copy (prog-uninit p)))
   (set-prog-done! p #f))
 
-(define (get-cell p pc)
-  (vector-ref (prog-instrs p) pc))
+(define (get-cell p i)
+  (when (>= i (vector-length (prog-instrs p)))
+    (double-memory! p)
+    (get-cell p i))
+  (vector-ref (prog-instrs p) i))
+
+(define (set-cell! p i v)
+  (when (>= i (vector-length (prog-instrs p)))
+    (double-memory! p)
+    (set-cell! p i v))
+  (vector-set! (prog-instrs p) i v))
 
 (define (get-param p i)
-  (vector-ref (prog-instrs p) (+ (prog-pc p) i)))
+  (get-cell p (+ (prog-pc p) i)))
 
 (define (get-param-val p i)
   (define op (cur-instr p))
   (define base (expt 10 (add1 i)))
   (define mode (quotient (modulo op (* base 10)) base))
   (define param (get-param p i))
-  (if (= mode 1)
-      param
-      (vector-ref (prog-instrs p) param)))
+  (cond
+    [(= mode 0) (get-cell p param)]
+    [(= mode 1) param]
+    [(= mode 2) (get-cell p (+ (prog-rb p) param))]))
+
+(define (set-param! p i v)
+  (define op (cur-instr p))
+  (define base (expt 10 (add1 i)))
+  (define mode (quotient (modulo op (* base 10)) base))
+  (define param (get-param p i))
+  (cond
+    [(= mode 0) (set-cell! p param v)]
+    [(= mode 1) (raise "Writing to direct param")]
+    [(= mode 2) (set-cell! p (+ (prog-rb p) param) v)]))
 
 (define (cur-instr p)
-  (vector-ref (prog-instrs p) (prog-pc p)))
+  (get-cell p (prog-pc p)))
 
 ;; Get short opcode
 (define (opcode p)
@@ -113,7 +144,7 @@
     (define op1 (get-param-val p 1))
     (define op2 (get-param-val p 2))
     (define dest (get-param p 3))
-    (vector-set! (prog-instrs p) dest (fun op1 op2))
+    (set-param! p 3 (fun op1 op2))
     (set-prog-pc! p (+ (prog-pc p) 4))))
 
 (define (make-jump-op pred)
@@ -128,9 +159,8 @@
   (lambda (p)
     (define a (get-param-val p 1))
     (define b (get-param-val p 2))
-    (define dest (get-param p 3))
     (define result (if (comp a b) 1 0))
-    (vector-set! (prog-instrs p) dest result)
+    (set-param! p 3 result)
     (set-prog-pc! p (+ (prog-pc p) 4))))
 
 (define add! (make-math-op +))
@@ -141,7 +171,7 @@
 (define cmpeq! (make-comp-op =))
 
 (define (inp! p in)
-  (vector-set! (prog-instrs p) (get-param p 1) (car in))
+  (set-param! p 1 (car in))
   (set-prog-pc! p (+ (prog-pc p) 2))
   (cdr in))
 
@@ -149,6 +179,11 @@
   (define res (cons (get-param-val p 1) out))
   (set-prog-pc! p (+ (prog-pc p) 2))
   res)
+
+(define (arb! p)
+  (define delta (get-param-val p 1))
+  (set-prog-rb! p (+ (prog-rb p) delta))
+  (set-prog-pc! p (+ (prog-pc p) 2)))
 
 (define (run! prog [input '()] #:debug [debug #f])
   (let loop ([in input]
@@ -168,7 +203,8 @@
       [(= op 5) (jnz! prog) (loop in out)]
       [(= op 6) (jiz! prog) (loop in out)]
       [(= op 7) (cmplt! prog) (loop in out)]
-      [(= op 8) (cmpeq! prog) (loop in out)])))
+      [(= op 8) (cmpeq! prog) (loop in out)]
+      [(= op 9) (arb! prog) (loop in out)])))
 
 
 (module+ test
