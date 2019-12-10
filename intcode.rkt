@@ -1,6 +1,7 @@
 #lang racket
 
-(require rackunit)
+(require rackunit
+         (for-syntax syntax/parse))
 
 (provide new-prog
          run!
@@ -12,59 +13,109 @@
 
 ;; A little mini assembler to help test things
 
-(struct reg (i) #:transparent)
+(struct var (name) #:transparent)
 (struct ptr (addr) #:transparent)
+(struct rel (addr) #:transparent)
+(struct ref (name) #:transparent)
 
-(define (normalize-addrs code consts regs addrs)
-  (for/fold ([code code]
-             [consts consts]
-             [regs regs])
-            ([addr (in-list addrs)])
-    (values
-     (cons addr code)
-     (if (number? addr)
-         (set-add consts addr)
-         consts)
-     (if (reg? addr)
-         (set-add regs addr)
-         regs))))
+(define (make-op code params)
+  (for/fold ([op code]
+             [dec 100]
+             [ipars '()]
+             #:result (cons op (reverse ipars)))
+            ([p (in-list params)])
+    (cond
+      [(number? p) (values (+ op dec) (* 10 dec) (cons p ipars))]
+      [(ptr? p) (values op (* 10 dec) (cons (ptr-addr p) ipars))]
+      [(rel? p) (values (+ op (* 2 dec)) (* 10 dec) (cons (rel-addr p) ipars))]
+      [(var? p) (values op (* 10 dec) (cons p ipars))]
+      [(ref? p) (values op (* 10 dec) (cons p ipars))])))
 
-(define (link code consts regs)
-  (define code-len (length code))
-  (define const-map (for/hash ([c (in-list consts)]
-                               [i (in-naturals code-len)])
-                      (values c i)))
-  (define reg-map (for/hash ([c (in-list regs)]
-                             [i (in-naturals (+ code-len (length consts)))])
-                    (values c i)))
-  (append
-   (for/list ([c (in-list code)])
+(module+ test
+  (check-equal? (make-op 2 (list (rel 1) 2 (ptr 10))) '(1202 1 2 10))
+  (check-equal? (make-op 4 (list (ptr 21))) '(4 21))
+  (check-equal? (make-op 5 (list (ptr 10) 12 (ref 'A))) (list 1005 10 12 (ref 'A))))
+
+(define (ops->int instrs)
+  (define codes (hash 'add 1
+                      'mul 2
+                      'inp 3
+                      'out 4
+                      'jnz 5
+                      'jiz 6
+                      'cmp< 7
+                      'cmp= 8
+                      'arb 9
+                      'halt 99))
+  (append*
+   (for/list ([i (in-list instrs)])
+     (define op (car i))
      (cond
-       [(eq? c 'add) 1]
-       [(eq? c 'mul) 2]
-       [(eq? c 'halt) 99]
-       [(reg? c) (hash-ref reg-map c)]
-       [(number? c) (hash-ref const-map c)]
-       [(ptr? c) (ptr-addr c)]))
-   consts
-   (make-list (length regs) 0)))
+       [(hash-has-key? codes op) (make-op (hash-ref codes op) (cdr i))]
+       [(equal? op 'label) (list i)]))))
 
-(define (asm instrs)
-  (list->vector 
-   (for/fold ([code '()]
-              [consts '()]
-              [regs '()]
-              #:result (link (reverse code) (reverse consts) (reverse regs)))
-             ([instr (in-list instrs)])
-     (normalize-addrs code consts regs instr))))
+(define (label? i)
+  (and (list? i)
+       (equal? (car i) 'label)))
 
-(define (add a b c)
-  (list 'add a b c))
+(define (replace-labels code)
+  (define addrs (for/fold ([addrs (hash)]
+                           [c 0]
+                           #:result addrs)
+                          ([ins (in-list code)])
+                  (if (label? ins)
+                      (values (hash-set addrs (cadr ins) c) c)
+                      (values addrs (add1 c)))))
+  (for/list ([ins (in-list code)]
+             #:when (not (label? ins)))
+    (if (ref? ins)
+        (hash-ref addrs (ref-name ins))
+        ins)))
 
-(define (mul a b c)
-  (list 'mul a b c))
+(define (replace-vars code)
+  (for/fold ([vars (hash)]
+             [acc '()]
+             [counter (length code)]
+             #:result (append
+                       (reverse acc)
+                       (make-list (hash-count vars) 0)))
+            ([i (in-list code)])
+    (cond
+      [(and (var? i) (hash-has-key? vars i)) (values vars
+                                                     (cons (hash-ref vars i) acc)
+                                                     counter)]
+      [(var? i) (values (hash-set vars i counter)
+                        (cons counter acc)
+                        (add1 counter))]
+      [else (values vars (cons i acc) counter)])))
 
-(define halt (list 'halt))
+(define compile (compose replace-vars
+                         replace-labels
+                         ops->int))
+
+
+(define-syntax (asm stx)
+  (syntax-parse stx
+    [(_ (op arg ...) ...) #'(list
+                             (list (quote op) arg ...) ...)]))
+
+
+(module+ test
+  (check-equal? 
+   (compile
+    (asm
+     (add 1 2 (var 'a))
+     (add 3 4 (var 'b))
+     (label 'A)
+     (mul (var 'a) (var 'b) (var 'c))
+     (out (var 'c))
+     (label 'end)
+     (halt)))
+   '(1101 1 2 15 1101 3 4 16 2 15 16 17 4 17 99 0 0 0)))
+
+
+
+
 
 ;; Running intcode
 
@@ -168,8 +219,8 @@
 (define mul! (make-math-op *))
 (define jiz! (make-jump-op (curry = 0)))
 (define jnz! (make-jump-op (compose not (curry = 0))))
-(define cmplt! (make-comp-op <))
-(define cmpeq! (make-comp-op =))
+(define cmp<! (make-comp-op <))
+(define cmp=! (make-comp-op =))
 
 (define (inp! p in)
   (set-param! p 1 (car in))
@@ -203,8 +254,8 @@
       [(= op 4) (loop in (out! prog out))]
       [(= op 5) (jnz! prog) (loop in out)]
       [(= op 6) (jiz! prog) (loop in out)]
-      [(= op 7) (cmplt! prog) (loop in out)]
-      [(= op 8) (cmpeq! prog) (loop in out)]
+      [(= op 7) (cmp<! prog) (loop in out)]
+      [(= op 8) (cmp=! prog) (loop in out)]
       [(= op 9) (arb! prog) (loop in out)])))
 
 
