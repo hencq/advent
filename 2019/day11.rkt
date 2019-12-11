@@ -34,8 +34,6 @@
    (apply max xs)
    (apply max ys)))
 
-(dimensions area)
-
 (define (display-area area)
   (match-define (list x1 y1 x2 y2) (dimensions area))
   (for ([y (in-range y2 (sub1 y1) -1)])
