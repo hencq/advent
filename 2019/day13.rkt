@@ -39,23 +39,33 @@
 (define (auto-play game)
   (restart! game)
   (set-cell! game 0 2)
-  (define score 0)
   (let loop ([in (list)]
-             [state (hash)])
+             [score 0]
+             [ball #f]
+             [paddle #f])
     (if (prog-done game)
         score
-        (let* ([out (run! game in)]
-               [newstate (for/fold ([state state])
-                                   ([tile (in-list (partition out 3))])
-                           (hash-set state (cons (car tile) (cadr tile)) (caddr tile)))]
-               [ball (car (filter (compose (curry = 4) cdr) (hash->list newstate)))]
-               [paddle (car (filter (compose (curry = 3) cdr) (hash->list newstate)))])
-          (set! score (hash-ref newstate (cons -1 0)))
-          (define in 
-            (cond
-              [(< (caar ball) (caar paddle)) '(-1)]
-              [(= (caar ball) (caar paddle)) '(0)]
-              [(> (caar ball) (caar paddle)) '(1)]))
-          (loop in newstate)))))
+        (let ([out (run! game in)])
+          (let-values ([(score ball paddle)
+                        (for/fold ([score score]
+                                   [ball ball]
+                                   [paddle paddle])
+                                  ([tile (in-list (partition out 3))])
+                          (cond
+                            [(= (car tile) -1) (values (caddr tile)
+                                                       ball paddle)]
+                            [(= (caddr tile) 4) (values score
+                                                        (car tile)
+                                                        paddle)]
+                            [(= (caddr tile) 3) (values score
+                                                        ball
+                                                        (car tile))]
+                            [else (values score ball paddle)]))])
+            (define in 
+              (cond
+                [(< ball paddle) '(-1)]
+                [(= ball paddle) '(0)]
+                [(> ball paddle) '(1)]))
+            (loop in score ball paddle))))))
 
 (auto-play input)
