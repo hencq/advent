@@ -4,6 +4,7 @@
          (for-syntax syntax/parse))
 
 (provide new-prog
+         set-cell!
          run!
          restart!
          set-prog-pc!
