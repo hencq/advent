@@ -15,7 +15,28 @@
 #d.....................#
 ########################")
 
+(define test2 "########################
+#...............b.C.D.f#
+#.######################
+#.....@.a.B.c.d.A.e.F.g#
+########################")
 
+(define test3 "#################
+#i.G..c...e..H.p#
+########.########
+#j.A..b...f..D.o#
+########@########
+#k.E..a...g..B.n#
+########.########
+#l.F..d...h..C.m#
+#################")
+
+(define test4 "########################
+#@..............ac.GI.b#
+###d#e#f################
+###A#B#C################
+###g#h#i################
+########################")
 
 (struct node (pos keys) #:transparent)
 
@@ -68,128 +89,97 @@
             [(found-all? cur) (values (sub1 steps) (node-keys cur))]
             [else (add-neighbors! cur steps seen) (walk (set-add seen cur))])))))
 
-
-(define (distances area start-keys)
-  (match-define (cons start keys) start-keys)
+(define (distances area start)
   (define (square pos)
     (hash-ref area pos #f))
-  (define (floor? pos)
-    (define sq (square pos))
-    (or 
-     (equal? sq #\.)
-     (equal? sq #\@)
-     (and (char? sq) (set-member? keys (char-downcase sq)))))
-  (define (unlocked-door? pos)
-    (define sq (square pos))
-    (and (char? sq) (char>=? sq #\A) (char<=? sq #\Z)
-         (set-member? keys (char-downcase sq))))
-  (define (key? pos)
-    (define sq (square pos))
-    (and (char? sq) (char>=? sq #\a) (char<=? sq #\z)
-         (not (set-member? keys sq))))
+  (define (floor? sq)
+    (or (equal? sq #\.)
+        (equal? sq #\@)))
+  (define (door? sq)
+    (and (char? sq) (char-upper-case? sq)))
+  (define (key? sq)
+    (and (char? sq) (char-lower-case? sq)))
+
   (define q (deque))
-  (define (add-neighbors! pos dist dists)
+  (define (add-neighbors! seen pos doors dist)
     (for ([dx (in-list '(1 0 -1 0))]
           [dy (in-list '(0 1 0 -1))])
       (define adj (cons (+ (car pos) dx) (+ (cdr pos) dy)))
-      (when (and (floor? pos)
-                 (not (hash-has-key? dists adj))
-                 (or (floor? adj) (unlocked-door? adj) (key? adj)))
-        (push-end! q (cons adj (add1 dist))))))
-  (push-end! q (cons start 0))
-  (let loop ([dists (hash)]
+      (when (not (set-member? seen adj))
+        (push-end! q (list adj doors (add1 dist))))))
+
+  (push-end! q (list start '() 0))
+  (let loop ([seen (set)]
              [key-dists (hash)])
     (if (deque-empty? q)
         key-dists
-        (match-let* ([(cons pos dist) (pop-front! q)]
+        (match-let* ([(list pos doors dist) (pop-front! q)]
                      [sq (square pos)])
-          (add-neighbors! pos dist dists)
-          (loop (hash-set dists pos dist)
-                (if (key? pos)
-                    (hash-set key-dists (cons pos (set-add keys sq)) dist)
-                    key-dists))))))
-
-
-
+          (cond
+            [(floor? sq) (add-neighbors! seen pos doors dist)
+                        (loop (set-add seen pos) key-dists)]
+            [(key? sq) (add-neighbors! seen pos doors dist)
+                       (loop (set-add seen pos) (hash-set key-dists sq (cons doors dist)))]
+            [(door? sq) (add-neighbors! seen pos (cons (char-downcase sq) doors) dist)
+                        (loop (set-add seen pos) key-dists)]
+            [else (loop (set-add seen pos) key-dists)])))))
 
 
 (define test-area (read-area test #:ignore '(#\#)))
+
+(distances test-area (cons 15 1))
+
 ;(min-dists test-area)
 ;(distances test-area (cons 15 1) '())
 
 (define (shortest-path mapstr)
   (define area (read-area mapstr #:ignore '(#\#)))
-  (define start (for/first ([(p t) (in-hash area)]
-                          #:when (equal? t #\@))
-                  p))
-  (define keys (map (compose car string->list)
-                    (regexp-match* "[a-z]" mapstr)))
-  (let loop ([i (sub1 (length keys))]
-             [squares (distances area (cons start (set)))])
-    (if (= i 0)
-        (apply min (hash-values squares))
-        (let ()
-          (define dists (for*/fold ([dists (hash)])
-                                   ([(sq dist) (in-hash squares)]
-                                    [(adj delta) (in-hash (distances area sq))])
-                          (define cached (hash-ref dists adj #f))
-                          (if (and cached (< cached (+ dist delta)))
-                              dists
-                              (hash-set dists adj (+ dist delta)))))
-          (loop (sub1 i) dists)))))
+  (define keys (for/hash ([(pos sq) (in-hash area)]
+                          #:when (or (char=? sq #\@)
+                                     (char-lower-case? sq)))
+                 (values sq pos)))
+  (define dists (for/hash ([(key pos) (in-hash keys)])
+                  (values key (distances area pos))))
+  (define (adjacents from-keys)
+    (match-define (cons from keys) from-keys)
+    (for*/list ([(to node) (in-hash (hash-ref dists from))]
+                [doors (in-value (car node))]
+                [dist (in-value (cdr node))]
+                #:when (and (not (set-member? keys to))
+                            (andmap (curry set-member? keys) doors)))
+      (cons to dist)))
+  
+  (let loop ([paths (hash (cons #\@ (set)) 0)])
+    (define dists (for*/fold ([dists (hash)])
+                             ([(path pathlen) (in-hash paths)]
+                              [adj (in-list (adjacents path))])
+                    (match-define (cons key dist) adj)
+                    (define found (set-add (cdr path) key))
+                    (define newnode (cons key found))
+                    (define cached (hash-ref dists newnode #f))
+                    (if (and cached (< cached (+ pathlen dist)))
+                        dists
+                        (hash-set dists newnode (+ pathlen dist)))))
+    (if (= 0 (hash-count dists))
+        (apply min (hash-values paths))
+        (loop dists))))
 
-
-;(distances test-area (cons 15 1) '())
-
-(define test2 "########################
-#...............b.C.D.f#
-#.######################
-#.....@.a.B.c.d.A.e.F.g#
-########################")
-
-;(min-dists test-area)
-;(shortest-path test3)
-;(shortest-path test3)
-;(shortest-path test3)
-(define test2-area (read-area test2 #:ignore '(#\#)))
-;(distances test2-area (cons 6 3) '())
-;(distances test2-area (cons 16 1) '(#\b))
-;(distances test2-area (cons 8 3) '(#\a #\b))
-
-
-
-(define test3 "#################
-#i.G..c...e..H.p#
-########.########
-#j.A..b...f..D.o#
-########@########
-#k.E..a...g..B.n#
-########.########
-#l.F..d...h..C.m#
-#################")
-
-;(shortest-path test3)
+(time (shortest-path test4))
 
 (define input (file->string "input18.txt"))
-(shortest-path input)
-
-;(shortest-path test3)
-(define test3-area (read-area test3 #:ignore '(#\#)))
-;test3-area
-;(distances test3-area (cons 8 4) '())
-;(distances test3-area (cons 1 3) '(#\g #\h #\a #\b #\j))
-
-;(find-keys test3)
-;Solution! 148 (m k n i c p e o l j b f d h a g)
-;; (distances test3-area (cons 1 1) '(#\i #\c #\p #\e #\o #\l #\j #\b #\f #\d
-;;                                     #\h #\a #\g))
+(time (shortest-path input))
 
 
-(define test4 "########################
-#@..............ac.GI.b#
-###d#e#f################
-###A#B#C################
-###g#h#i################
-########################")
 
-;(find-keys test4)
+
+
+
+
+
+
+
+
+
+
+
+
