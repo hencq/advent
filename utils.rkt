@@ -18,7 +18,10 @@
  push-end!
  rotate!
  deque->list
- list->deque)
+ list->deque
+ 
+ read-area
+ print-area)
 
 (define (take-upto lst pos)
   (with-handlers
@@ -169,4 +172,68 @@
     [(< n 0) (for ([i (in-range (- n))])
                (define end (pop-end! dq))
                (push-front! dq end))]))
+
+
+;; Some helpers to deal with map based questions
+;; E.g. to quickly read a map into a hash table and print it back
+
+(define (rotate-pos pos [dir 1])
+  (cons (* -1 dir (cdr pos)) (* dir (car pos))))
+
+(define (area-dimensions area)
+  (for/fold ([dimensions (list #f #f #f #f)])
+            ([pos (in-list (hash-keys area))])
+    (match-define (list x1 y1 x2 y2) dimensions)
+    (list (if x1 (min x1 (car pos)) (car pos))
+          (if y1 (min y1 (cdr pos)) (cdr pos))
+          (if x2 (max x2 (car pos)) (car pos))
+          (if y2 (max y2 (cdr pos)) (cdr pos)))))
+
+(define (print-area area [tile-fun values] [dimensions #f])
+  (when (not dimensions)
+    (set! dimensions (area-dimensions area)))
+  (when (hash? tile-fun)
+    (set! tile-fun (hash->fun tile-fun)))
+  
+  (match-define (list x1 y1 x2 y2) dimensions)
+  (for ([y (in-range y1 (add1 y2))])
+    (for ([x (in-range x1 (add1 x2))])
+      (define tile (tile-fun (hash-ref area (cons x y) #f)))
+      (if tile
+          (printf "~a" tile)
+          (printf " ")))
+    (printf "~%")))
+
+(define (read-area lines [char-fun values] #:ignore [ignore (set)])
+  (when (string? lines)
+    (set! lines (string-split lines "\n")))
+  (when (hash? char-fun)
+    (set! char-fun (hash->fun char-fun)))
+  
+  (for/fold ([area (hash)])
+            ([row (in-list lines)]
+             [y (in-naturals)])
+    (for/fold ([area area])
+              ([col (in-list (string->list row))]
+               [x (in-naturals)])
+      (if (set-member? ignore col)
+          area
+          (let ([tile (char-fun col)])
+            (if tile
+                (hash-set area (cons x y) tile)
+                area))))))
+
+(define (hash->fun h [else #f])
+  (lambda (k [else else])
+    (hash-ref h k else)))
+
+;; (define test "###########
+;; #         #
+;; #   #     #
+;; # $ #  @  #
+;; ###########")
+
+;; (print-area (read-area test #:ignore '(#\space)))
+
+
 
