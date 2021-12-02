@@ -21,7 +21,8 @@
  list->deque
  
  read-area
- print-area)
+ print-area
+ area-dimensions)
 
 (define (take-upto lst pos)
   (with-handlers
