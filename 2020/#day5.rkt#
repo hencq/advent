@@ -1,0 +1,35 @@
+#lang racket
+
+(define (row pass)
+  (for/sum ([c (in-list (reverse (string->list (substring pass 0 7))))]
+            [i (in-naturals)])
+    (if (eq? c #\B)
+        (expt 2 i)
+        0)))
+
+(define (col pass)
+  (for/sum ([c (in-list (reverse (string->list (substring pass 7 10))))]
+            [i (in-naturals)])
+    (if (eq? c #\R)
+        (expt 2 i)
+        0)))
+
+(define (seat-id pass)
+  (+ (* 8 (row pass)) (col pass)))
+
+(define passes (file->lines "input5.txt"))
+
+(apply max (map seat-id passes))
+
+(define (missing passes)
+  (define ids (list->set (map seat-id passes)))
+  (for/list ([i (in-range (expt 2 10))]
+             #:when (and (not (set-member? ids i))
+                         (set-member? ids (add1 i))
+                         (set-member? ids (sub1 i))))
+    i))
+
+(missing passes)
+(seat-id "FBFBBFFRLR")
+(seat-id "FFFBBBFRRR")
+(seat-id "BBFFBBFRLL")
