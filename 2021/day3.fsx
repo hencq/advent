@@ -17,49 +17,13 @@ let test = [
 
 let input = File.ReadAllLines "input3.txt" |> Array.toList
 
-let count key table =
-  table |> Map.change key (fun x ->
-                           match x with
-                           | Some c -> Some (c + 1)
-                           | None -> Some 1)
-
-let countBits state (bits : string) =
-  Array.map2 count (bits.ToCharArray()) state
-  
-let countAll (bytes : string list) =
-  let state = Array.init (String.length bytes[0]) (fun _ -> Map.empty) 
-  List.fold countBits state bytes 
-
-let makeConverter sorter =
-  fun bytes ->
-    countAll bytes
-    |> Array.map (fun m ->
-                    Map.toList m
-                    |> List.sortBy sorter 
-                    |> fun list -> match list with (b, _)::_ -> b) 
-    |> System.String 
-    |> fun s -> System.Convert.ToInt32(s, 2)
-
-let gamma = makeConverter (fun (_, c) -> -c)
-let epsilon = makeConverter (fun (_, c) -> c)
-
-let part1 bytes = (gamma bytes) * (epsilon bytes)
-
-part1 input
-
-let transpose (bytes : string list) =
-  let init = Array.init (String.length bytes[0]) (fun _ -> [])
-  let folder state (byte : string) =
-    Array.map2 (fun col b -> b::col) state (byte.ToCharArray())
-  List.fold folder init bytes
-
-transpose test
-
+// get a column of bits from the list of bytes by col number
 let getColumn (bytes : string list) col =
   let folder state (byte : string) =
     (byte[col])::state
   List.fold folder [] bytes
 
+// count the bits and return the most common
 let mostCommon col =
   let rec count col ones zeroes =
     match col with
@@ -71,6 +35,25 @@ let mostCommon col =
 let leastCommon col =
   if mostCommon col = '1' then '0' else '1'
 
+// get each column and determine whether it's 1 or 0 
+let collectBits criteria (bytes : string list) =
+  let cols = String.length bytes[0]
+  [for i = 0 to cols - 1 do
+     let col = getColumn bytes i
+     yield criteria col]
+  |> Array.ofList
+  |> System.String
+  |> fun s -> System.Convert.ToInt32(s, 2)
+    
+collectBits mostCommon test
+let gamma = collectBits mostCommon
+let epsilon = collectBits leastCommon
+
+let part1 bytes = (gamma bytes) * (epsilon bytes)
+
+part1 input
+
+// filter the bytes based on the given criteria
 let filterBytes criteria (bytes : string list) =
   let cols = String.length bytes[0]
   let rec filter colnum bytes =
