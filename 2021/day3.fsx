@@ -19,7 +19,8 @@ let input =
 
 // get a column of bits from the list of bytes by col number
 let getColumn (bytes: string list) col =
-  List.fold (fun state (byte : string) -> byte.[col] :: state) [] bytes
+  bytes
+  |> List.fold (fun state byte -> byte.[col] :: state) [] 
 
 // count the bits and return the most common
 let mostCommon col =
