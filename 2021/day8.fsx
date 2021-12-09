@@ -20,8 +20,6 @@ let part1 input =
               |> Seq.length)
   |> Seq.sum
 
-part1 input
-
 let digits =
   ["abcefg"; "cf"; "acdeg"; "acdfg"; "bcdf"; "abdfg"; "abdefg"; "acf";
    "abcdefg"; "abcdfg"]
@@ -31,64 +29,42 @@ let digitMap =
   |> Map.ofSeq
   
 let lenMap =
-   digits
-   |> Seq.map (fun word -> (String.length word, Set.ofSeq word))
-   |> Seq.fold
-        (fun mapping (len, options) ->
-         mapping
-         |> Map.change len (fun optSet ->
-                            match optSet with
-                            | Some st -> Set.intersect st options |> Some
-                            | None -> Some options))
-        Map.empty
-                         
+  digits
+  |> Seq.map Set.ofSeq
+  |> Seq.groupBy Set.count
+  |> Map.ofSeq
+  |> Map.map (fun _ sets -> Set.intersectMany sets)
+            
 let rec propagate mapping =
-  let getFixed m =
-    m
-    |> Map.toSeq
-    |> Seq.choose (fun (ch, vs) ->
-                   if (Set.count vs) = 1 then
-                     vs |> Set.toList |> List.head |> fun v -> Some (ch, v)
-                   else
-                     None)
-  let fix = getFixed mapping
-  let next =
-    mapping
-    |> Map.map (fun ch st ->
-      (st, fix)
-      ||> Seq.fold (fun st (fixch, fixval) ->
-           if ch = fixch then
-             st
-           else
-             Set.remove fixval st))
+  mapping
+  |> Map.filter (fun _ st -> Set.count st = 1)
+  |> Map.map (fun _ st -> st |> Set.toList |> List.head)
+  |> Map.fold
+      (fun state k fix ->
+        state
+        |> Map.map (fun k2 v -> if k = k2 then v else Set.remove fix v))
+      mapping
+  |> fun m -> if m = mapping then m else propagate m
 
-  if (next |> getFixed |> Seq.length) > (fix |> Seq.length) then
-    propagate next
-  else
-    next
-    |> Map.map (fun ch st -> st |> Set.toList |> List.head)
-    |> Map.toSeq
-    |> Seq.map (fun (a, b) -> (b, a))
-    |> Map.ofSeq
-    
 let createMapping entry =
   (fst entry)
-  |> Seq.collect (fun (word : string) ->
-                    let options = word |> Set.ofSeq
-                    lenMap.[word.Length]
-                    |> Set.map (fun ch -> (ch, options)))
-  |> Seq.fold
-       (fun mapping (ch, options) ->
-          mapping
-          |> Map.change ch (fun optSet ->
-                              match optSet with
-                              | Some st -> Set.intersect st options |> Some
-                              | None -> Some options))
-       Map.empty
-   |> propagate
+  |> Seq.map Set.ofSeq
+  |> Seq.groupBy Set.count
+  |> Seq.collect (fun (n, sets) ->
+                  sets
+                  |> Set.intersectMany
+                  |> Set.map (fun s -> (s, lenMap.[n])))
+  |> Seq.groupBy fst
+  |> Seq.map (fun (ch, sets) ->
+              sets
+              |> Seq.map snd
+              |> Set.intersectMany
+              |> fun s -> (ch, s))
+  |> Map.ofSeq
+  |> propagate
+  |> Map.map (fun _ v -> v |> Set.toList |> List.head)
 
-    
-let unscramble word mapping =
+let unscramble mapping word =
   word
   |> Seq.map (fun ch -> Map.find ch mapping)
   |> Seq.sort
@@ -99,7 +75,7 @@ let unscramble word mapping =
 let convertEntry entry =
   let mapping = createMapping entry
   (snd entry)
-  |> Seq.map (fun w -> unscramble w mapping)
+  |> Seq.map (unscramble mapping)
   |> Seq.map2 (*) [1000; 100; 10; 1]
   |> Seq.sum
 
@@ -108,4 +84,5 @@ let part2 entries =
   |> Array.map convertEntry
   |> Array.sum
   
+part1 input
 part2 input
