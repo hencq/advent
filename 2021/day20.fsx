@@ -2,13 +2,15 @@ open System.IO
 
 type Image =
   { Algo : bool[]
-    Data : Map<int * int, bool>
+    Data : bool[,]
     Default : bool }
     
-let get pt (img : Image) =
-  match Map.tryFind pt img.Data with
-  | Some v -> v
-  | None -> img.Default
+let get (x, y) (img : Image) =
+  let width = Array2D.length2 img.Data
+  let height = Array2D.length1 img.Data
+  if x < 0 || y < 0 then img.Default
+  elif x >= width || y >= height then img.Default
+  else img.Data[y, x]
 
 let readInput input =
   let [| algs; ms |] = File.ReadAllText input |> fun txt -> txt.Split("\n\n")
@@ -18,24 +20,18 @@ let readInput input =
                   | '#' -> true
                   | _ -> false)
   let img =
-    ms.Split("\n")
-    |> Seq.indexed
-    |> Seq.collect (fun (y, l) ->
+    ms.Trim().Split("\n")
+    |> Seq.map (fun l ->
                       l
-                      |> Seq.mapi (fun x ch ->
+                      |> Seq.map (fun ch ->
                                      match ch with
-                                     | '#' -> ((x, y), true)
-                                     | _ -> ((x, y), false)))
-    |> Map.ofSeq 
+                                     | '#' -> true
+                                     | _ -> false))
+    |> array2D
   { Algo = alg; Data = img; Default = false }
     
 let test = readInput "test20.txt"
 
-let dims img =
-  let xs = img.Data |> Map.toSeq |> Seq.map (fst >> fst)
-  let ys = img.Data |> Map.toSeq |> Seq.map (fst >> snd)
-  (Seq.min xs, Seq.min ys, Seq.max xs, Seq.max ys)
-  
 let ptVal img (x, y) =
   [ for y' in y - 1 .. y + 1 do
       for x' in x - 1 .. x + 1 ->
@@ -44,39 +40,44 @@ let ptVal img (x, y) =
   |> List.reduce (fun sum n -> 2 * sum + n)  
 
 let step img =
-  let x0, y0, x1, y1 = dims img
-  [ for y in y0 - 1 .. y1 + 1 do
-      for x in x0 - 1 .. x1 + 1 do
-        (x, y) ]
-  |> List.map (fun pt -> (pt, img.Algo[ptVal img pt]))
-  |> Map.ofList
-  |> fun data ->
-       let deft = if img.Default then img.Algo[511] else img.Algo[0]
-       { img with Data = data; Default = deft }
+  let height = (Array2D.length1 img.Data) + 2
+  let width = (Array2D.length2 img.Data) + 2
+  let data = Array2D.create height width false
+  for y in 0 .. height - 1 do
+    for x in 0 .. width - 1 do
+      data[y, x] <- img.Algo[ptVal img (x - 1, y - 1)]
+  
+  let deft = if img.Default then img.Algo[511] else img.Algo[0]
+  { img with Data = data; Default = deft }
   
 let printImg img =
-  let x0, y0, x1, y1 = dims img
+  let height = Array2D.length1 img.Data
+  let width = Array2D.length2 img.Data
   printfn ""
-  for y in y0 .. y1 do
-    for x in x0 .. x1 do
-      if img.Data[(x, y)] then
+  for y in 0 .. height - 1 do
+    for x in 0 .. width - 1 do
+      if img.Data[y, x] then
         printf "#"
       else
         printf "."
     printfn ""
     
-
+let litCount img =
+  let mutable count = 0
+  img.Data
+  |> Array2D.iter (fun v -> if v then count <- count + 1)
+  count
 
 let part1 img =
   img
   |> step
   |> step
-  |> fun img -> img.Data |> Map.values |> Seq.filter id |> Seq.length
+  |> litCount
 
 let part2 img =
   seq { for i in 1 .. 50 -> i }
   |> Seq.fold (fun img _ -> step img) img
-  |> fun img -> img.Data |> Map.values |> Seq.filter id |> Seq.length
+  |> litCount
 
 part1 test
 part2 test
@@ -84,6 +85,7 @@ part2 test
 let input = readInput "input20.txt"
 part1 input
 part2 input
+
 
 
 

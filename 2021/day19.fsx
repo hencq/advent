@@ -12,17 +12,18 @@ let readInput fname =
 let test = readInput "test19.txt"
 let input = readInput "input19.txt"
 
+let dist a1 a2 =
+  Array.map2 (-) a1 a2
+  |> Array.map (fun x -> pown x 2)
+  |> Array.sum
+
 let distances (cube : int[][]) =
-  let dist a1 a2 =
-    Array.map2 (-) a1 a2
-    |> Array.map (fun x -> pown x 2)
-    |> Array.sum
   cube
-  |> Array.map
+  |> Array.collect
       (fun a ->
          cube
-         |> Array.map (fun b -> dist a b)
-         |> set)
+         |> Array.map (fun b -> dist a b))
+  |> set
        
 let mmul (m1 : int[][]) (m2 : int[][]) =
   let n = Array.length m1
@@ -57,6 +58,10 @@ let rots =
       [ rotZ; x3 rotZ ] |> List.collect (turn rotY) ]
   rots |> List.concat
 
+let rotate v rot =
+  let m = [| v |]
+  (mmul m rot).[0]
+  
 let vdiff v1 v2 =
   (v1, v2)
   ||> Array.map2 (fun p1 p2 -> p1 - p2)
@@ -77,7 +82,9 @@ let tryMatchPt (dist1 : Set<int>) (dists2 : Set<int>[]) =
         loop (i + 1)
   loop 0
 
-let tryFindDiff (cube1 : int[][]) (dists1 : Set<int>[]) (cube2 : int[][]) (dists2 : Set<int>[]) =
+let tryFindDiff (cube1 : int[][]) (dists1 : Set<int>) (cube2 : int[][]) (dists2 : Set<int>) rot =
+  if (Set.intersect dists1 dists2 |> Set.count) > 66 then
+    
   let len = cube1.Length
   let rec loop i diffOpt =
     if i = len then
@@ -86,7 +93,8 @@ let tryFindDiff (cube1 : int[][]) (dists1 : Set<int>[]) (cube2 : int[][]) (dists
       match tryMatchPt dists1.[i] dists2  with
       | None -> loop (i + 1) diffOpt
       | Some j ->
-          let d' = vdiff cube1.[i] cube2.[j]
+          let v2 = rotate cube2.[j] rot
+          let d' = vdiff cube1.[i] v2
           match diffOpt with
           | None -> loop (i + 1) (Some d')
           | Some d when d = d' -> loop (i + 1) diffOpt
@@ -98,14 +106,40 @@ type Scanner =
     Beacons : int[][] }
 
 let findTranslation cube1 dists1 cube2 dists2 =
-  let tryRot rot =
-    let cube2' = mmul cube2 rot
-    match tryFindDiff cube1 dists1 cube2' dists2 with
-    | None -> None
-    | Some diff -> Some { Pos = diff; Beacons = (Array.map (vadd diff) cube2') }
-  rots
-  |> Seq.tryPick tryRot
+  let tryRot (a1, b1) (a2, b2) rot =
+    let b1' = rotate b1 rot
+    let b2' = rotate b2 rot
+    let d1 = vdiff a1 b1'
+    let d2 = vdiff a2 b2'
+    if d1 = d2 then
+      Some { Pos = d1; Beacons = (Array.map (vadd d1) (mmul cube2 rot)) }
+    else
+      None
+  if (Set.intersect dists1 dists2 |> Set.count) > 66 then
+    let pts1 =
+      cube1
+      |> Array.map (fun p ->
+                          let d = Array.map (dist p) cube1 |> set
+                          (p, d))
+    let pts2 =
+      cube2
+      |> Array.map (fun p ->
+                          let d = Array.map (dist p) cube2 |> set
+                          (p, d))
+    let pair1 :: pair2 :: [] =
+      seq { for (p1, d1) in pts1 do
+              for (p2, d2) in pts2 do
+                if (Set.intersect d1 d2 |> Set.count) > 11 then
+                  yield (p1, p2) }
+      |> Seq.take 2
+      |> List.ofSeq
+
+    rots
+    |> Seq.tryPick (tryRot pair1 pair2) 
+  else
+    None
   
+findTranslation test[0] distMap[0] test[1] distMap[1]
 
 let canonicalize cubes =
   let distMap = Array.map distances cubes
@@ -143,13 +177,13 @@ let part1 input =
   |> beacons
   |> Array.length
 
-
 let maxDist scanners =
   let dist s1 s2 = Array.map2 (-) s1.Pos s2.Pos |> Array.map abs |> Array.sum 
   scanners
   |> Array.collect (fun s1 -> Array.map (dist s1) scanners)
   |> Array.max
 
+#time
 let canon = scanners input
 canon |> beacons |> Array.length
 canon |> maxDist
