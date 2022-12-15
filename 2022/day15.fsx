@@ -31,13 +31,16 @@ let findMarked row sensors =
     |> Array.sortBy fst
  
 let findGap marked =
-    let marked = Array.toList marked
-    let rec loop (a, b) marked =
-        match marked with
-        | [] -> None
-        | (c, d) :: tl -> if c > b + 1 then Some (b + 1) else loop (a, (max b d)) tl
-    loop (List.head marked) (List.tail marked)
+    let rec loop hi i =
+        if i = Array.length marked then None
+        elif hi > 4000000 then None
+        else
+            let (a, b) = marked[i]
+            if a > hi + 1 then Some (hi + 1) else loop (max hi b) (i + 1)
+    loop (snd marked[0]) 1
                              
+test |> findMarked 11 |> findGap
+
 let findBeacon rows sensors =
     let rec loop y =
         if y = rows then None
@@ -47,6 +50,12 @@ let findBeacon rows sensors =
             | None -> loop (y + 1)
     loop 0
 
+readInput "test15.txt"
+|> findBeacon 20
+
+readInput "input15.txt"
+|> findMarked 1
+
 readInput "input15.txt"
 |> findMarked 2000000
 |> Array.reduce (fun (a, b) (c, d) -> (a, max b d))
@@ -55,3 +64,5 @@ readInput "input15.txt"
 readInput "input15.txt"
 |> findBeacon 4000000
 |> function |Some (x, y) -> 4000000UL * (uint64 x) + (uint64 y) |None -> 0UL
+
+#time
