@@ -29,9 +29,10 @@ let parse lines =
 
 (* To save time we use a map of previous cells because each grain of sand will follow the same path
 as the previous grain up to the previous cell. *)
-let rec step (mp : HashSet<_>) isFree maxy (prevs : Map<Point, Point>, ((x, y) as pt)) =
+let rec step (mp : HashSet<_>) (prevs : Dictionary<Point, Point>) isFree maxy ((x, y) as pt) =
     let step next =
-        step mp isFree maxy ((Map.add next pt prevs), next)
+        prevs.Add(next, pt)
+        step mp prevs isFree maxy next
     if y > maxy then None
     elif not <| isFree pt then None
     elif isFree (x, y + 1) then step (x, y + 1)
@@ -39,22 +40,29 @@ let rec step (mp : HashSet<_>) isFree maxy (prevs : Map<Point, Point>, ((x, y) a
     elif isFree (x + 1, y + 1) then step (x + 1, y + 1)
     else
         mp.Add(pt) |> ignore
-        Some (pt, (prevs, prevs[pt]))
+        Some (pt, prevs[pt])
 
 let part1 (init : (int * int)[]) =
     let maxy = Seq.map snd init |> Seq.max
     let mp = new HashSet<_>(init)
     let isFree pt = mp.Contains pt |> not
+    let prevs = new Dictionary<_,_>()
     let src = (500, 0)
-    Seq.unfold (step mp isFree maxy) (Map.empty, src) |> Seq.length
+    Seq.unfold (step mp prevs isFree maxy) src |> Seq.length
 
 let part2 (init : (int * int)[]) =
     let maxy = Seq.map snd init |> Seq.max |> (+) 2
     let mp = new HashSet<_>(init)
     let isFree (x, y) = y < maxy && not (mp.Contains (x, y))
+    let prevs = new Dictionary<_,_>()
     let src = (500, 0)
-    Seq.unfold (step mp isFree maxy) (Map.empty.Add(src, src), src) |> Seq.length
+    prevs.Add(src, src)
+    Seq.unfold (step mp prevs isFree maxy) src |> Seq.length
     
+File.ReadAllLines "input14.txt"
+|> parse
+|> part1
+
 File.ReadAllLines "input14.txt"
 |> parse
 |> part2
