@@ -1,6 +1,8 @@
 open System.IO
 open System.Collections.Generic
 
+type Point = int * int
+
 let test =
     [| "498,4 -> 498,6 -> 496,6"
        "503,4 -> 502,4 -> 502,9 -> 494,9" |]
@@ -24,38 +26,37 @@ let parsePath (l : string) =
 let parse lines =
     lines
     |> Array.collect parsePath
-    |> Set.ofArray
-                      
-let step1 _ (mp : HashSet<_>) =
-    let maxy = mp |> Seq.map snd |> Seq.max
-    let rec loop x y =
-       if y > maxy then ()
-       elif not (mp.Contains((x, y + 1)))then loop x (y + 1)
-       elif not (mp.Contains((x - 1, y + 1))) then loop (x - 1) (y + 1)
-       elif not (mp.Contains((x + 1, y + 1))) then loop (x + 1) (y + 1)
-       else mp.Add((x, y)) |> ignore
-    loop 500 0
 
-let step2 floor (mp : HashSet<_>) =
-    let isFree x y =
-        (y < floor) && (not (mp.Contains((x, y))))
-    let rec loop x y =
-       if isFree x (y + 1) then loop x (y + 1)
-       elif isFree (x - 1) (y + 1) then loop (x - 1) (y + 1)
-       elif isFree (x + 1) (y + 1) then loop (x + 1) (y + 1)
-       else mp.Add((x, y)) |> ignore
-    if isFree 500 0 then loop 500 0 else ()
+(* To save time we use a map of previous cells because each grain of sand will follow the same path
+as the previous grain up to the previous cell. *)
+let rec step (mp : HashSet<_>) isFree maxy (prevs : Map<Point, Point>, ((x, y) as pt)) =
+    let step next =
+        step mp isFree maxy ((Map.add next pt prevs), next)
+    if y > maxy then None
+    elif not <| isFree pt then None
+    elif isFree (x, y + 1) then step (x, y + 1)
+    elif isFree (x - 1, y + 1) then step (x - 1, y + 1)
+    elif isFree (x + 1, y + 1) then step (x + 1, y + 1)
+    else
+        mp.Add(pt) |> ignore
+        Some (pt, (prevs, prevs[pt]))
 
-let fall step init =
-    let floor = Seq.map snd init |> Seq.max |> fun x -> x + 2
-    let mp = new HashSet<_>(init |> Set.toSeq)
-    let rec loop i =
-        let cnt = mp.Count
-        step floor mp
-        if mp.Count = cnt then i
-        else loop (i + 1)
-    loop 0
+let part1 (init : (int * int)[]) =
+    let maxy = Seq.map snd init |> Seq.max
+    let mp = new HashSet<_>(init)
+    let isFree pt = mp.Contains pt |> not
+    let src = (500, 0)
+    Seq.unfold (step mp isFree maxy) (Map.empty, src) |> Seq.length
 
+let part2 (init : (int * int)[]) =
+    let maxy = Seq.map snd init |> Seq.max |> (+) 2
+    let mp = new HashSet<_>(init)
+    let isFree (x, y) = y < maxy && not (mp.Contains (x, y))
+    let src = (500, 0)
+    Seq.unfold (step mp isFree maxy) (Map.empty.Add(src, src), src) |> Seq.length
+    
 File.ReadAllLines "input14.txt"
 |> parse
-|> fall step2
+|> part2
+
+#time
