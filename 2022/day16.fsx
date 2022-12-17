@@ -51,12 +51,11 @@ let dists (cave : Cave) =
 
 let tuple2 a b = (a, b)
 
-let salesman cave e =
+let salesman cave =
     let dists = dists cave
     let valves = cave.graph |> Array.mapi tuple2 |> Array.choose (fun (i, v) -> if v.flow > 0 then Some i else None)
     let len = Array.length valves
     let memo = Array.init len (fun _ -> Array.create (1 <<< len) None)
-    let S = [0..(len-1)] |> Seq.fold (fun S i -> S ||| (1 <<< i)) 0
     // value of traveling from 0 to i via nodes in S
     let rec value S i =
         //trivial case, straight from 0 to i
@@ -93,11 +92,79 @@ let salesman cave e =
     }
     |> Seq.maxBy (fun (_, v, _) -> v)
 
-//dists input 
     
-salesman test 1
-salesman input 1
-//(dists input).[input.indices["IO"]].[input.indices["PP"]]
+salesman test
+salesman input
 
-[0..(6-1)] |> Seq.fold (fun S i -> S ||| (1 <<< i)) 0
-(1 <<< 6) - 1
+let solveDfs cave =
+    let dists = dists cave
+    let targets = cave.graph |> Array.mapi (fun i v -> if v.flow > 0 then Some i else None) |> Array.choose id
+    let valve i = cave.graph[targets[i]]
+    let len = Array.length targets
+    let memo = Array.init len (fun _ -> Array.create (1 <<< len) None)
+    let rec dfs visited time released i path =
+        if time <= 0 || visited = (1 <<< len) - 1 then (released, path)
+        else
+            let released = released + time * (valve i).flow
+            let visited = visited ||| (1 <<< i)
+            match memo[i][visited] with
+            | Some (bound, res) when bound > released -> res
+            | _ ->
+                let path' = (30 - time, (valve i).name) :: path
+                let result =
+                    seq {
+                        yield (released, path')
+                        for j = 0 to len - 1 do
+                            if visited &&& (1 <<< j) = 0 then
+                                yield dfs visited (time - dists[targets[i]][targets[j]] - 1) released j path'
+                    }
+                    |> Seq.maxBy fst
+                memo[i][visited] <- Some (released, result)
+                result
+    seq {
+        for i in 0..(len - 1) do
+           let t = 30 - dists[cave.indices["AA"]][targets[i]] - 1
+           dfs 0 t 0 i []
+    }
+    |> Seq.maxBy fst
+
+
+let solveBfs cave =
+    let dists = dists cave
+    let targets = cave.graph |> Array.mapi (fun i v -> if v.flow > 0 then Some i else None) |> Array.choose id
+    let valve i = cave.graph[targets[i]]
+    let len = Array.length targets
+    let memo = Array.init len (fun _ -> Array.create (1 <<< len) None)
+    let q = new Queue<_>()
+    let rec bfs bestScore bestPath =
+        if q.Count = 0 then (bestScore, List.rev bestPath)
+        else
+            let (visited, i, time, released, path) = q.Dequeue()
+            if time <= 0 || visited = (1 <<< len) - 1 then 
+                bfs bestScore bestPath
+            else
+                let released = released + time * (valve i).flow
+                let visited = visited ||| (1 <<< i)
+                match memo[i][visited] with
+                | Some bound when bound > released -> bfs bestScore bestPath
+                | _ ->
+                    memo[i][visited] <- Some released
+                    let path' = (30 - time, (valve i).name) :: path
+                    for j = 0 to len - 1 do
+                        if visited &&& (1 <<< j) = 0 then
+                            q.Enqueue(visited, j, (time - dists[targets[i]][targets[j]] - 1), released, path')
+                    if released > bestScore then bfs released path' else bfs bestScore bestPath
+
+    for i in 0..(len - 1) do
+        let t = 30 - dists[cave.indices["AA"]][targets[i]] - 1
+        q.Enqueue((0, i, t, 0, []))
+    bfs 0 []
+
+    
+   
+
+#time
+solveBfs test 
+solveBfs input
+
+
