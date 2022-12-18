@@ -32,6 +32,7 @@ let parse fname =
 let test = "test16.txt" |> parse
 let input = "input16.txt" |> parse
 
+// Calculate all the distances between all the valves (including non-working valves)
 let dists (cave : Cave) =
     let len = Array.length cave.graph
     let dists = Array.init len (fun _ -> Array.create len 0)
@@ -49,122 +50,68 @@ let dists (cave : Cave) =
 
     dists
 
-let tuple2 a b = (a, b)
-
-let salesman cave =
+// Solve traveling salesman by a bfs with pruning with bounds
+let solve cave (targets : int[]) startTime =
     let dists = dists cave
-    let valves = cave.graph |> Array.mapi tuple2 |> Array.choose (fun (i, v) -> if v.flow > 0 then Some i else None)
-    let len = Array.length valves
-    let memo = Array.init len (fun _ -> Array.create (1 <<< len) None)
-    // value of traveling from 0 to i via nodes in S
-    let rec value S i =
-        //trivial case, straight from 0 to i
-        if S = (1 <<< i) then
-            let time = 30 - dists[cave.indices["AA"]][valves[i]] - 1
-            let flow = time * cave.graph[valves[i]].flow
-            (time, flow, [(time, cave.graph[valves[i]].name)])
-        else
-            match memo[i][S] with
-            | Some v -> v
-            | None -> 
-                let Si = S &&& (~~~ (1 <<< i)) // remove i from S and call it Si
-                let result =
-                    [
-                        for j in 0..(len-1) do             // for all j in Si
-                            if (Si &&& (1 <<< j)) > 0 && j <> i then yield j
-                    ]
-                    |> List.fold
-                        (fun (t, f, p) j ->
-                            let (time', flow', path') = value Si j
-                            let time'' = time' - dists.[valves[j]].[valves[i]] - 1
-                            let flow'' = flow' + (time'' * cave.graph[valves[i]].flow)
-                            if time'' >= 0  && flow'' > f then
-                                (time'', flow'', (30 - time'', cave.graph[valves[i]].name) :: path')
-                            else (t, f, p))
-                        (0, 0, [])
-                memo[i][S] <- Some result
-                result
-
-    seq {
-        for S in 1..((1 <<< len)-1) do
-            for e in 0..(len-1) do
-               value S e 
-    }
-    |> Seq.maxBy (fun (_, v, _) -> v)
-
-    
-salesman test
-salesman input
-
-let solveDfs cave =
-    let dists = dists cave
-    let targets = cave.graph |> Array.mapi (fun i v -> if v.flow > 0 then Some i else None) |> Array.choose id
-    let valve i = cave.graph[targets[i]]
-    let len = Array.length targets
-    let memo = Array.init len (fun _ -> Array.create (1 <<< len) None)
-    let rec dfs visited time released i path =
-        if time <= 0 || visited = (1 <<< len) - 1 then (released, path)
-        else
-            let released = released + time * (valve i).flow
-            let visited = visited ||| (1 <<< i)
-            match memo[i][visited] with
-            | Some (bound, res) when bound > released -> res
-            | _ ->
-                let path' = (30 - time, (valve i).name) :: path
-                let result =
-                    seq {
-                        yield (released, path')
-                        for j = 0 to len - 1 do
-                            if visited &&& (1 <<< j) = 0 then
-                                yield dfs visited (time - dists[targets[i]][targets[j]] - 1) released j path'
-                    }
-                    |> Seq.maxBy fst
-                memo[i][visited] <- Some (released, result)
-                result
-    seq {
-        for i in 0..(len - 1) do
-           let t = 30 - dists[cave.indices["AA"]][targets[i]] - 1
-           dfs 0 t 0 i []
-    }
-    |> Seq.maxBy fst
-
-
-let solveBfs cave =
-    let dists = dists cave
-    let targets = cave.graph |> Array.mapi (fun i v -> if v.flow > 0 then Some i else None) |> Array.choose id
+    let cost i j = dists[targets[i]][targets[j]] + 1
     let valve i = cave.graph[targets[i]]
     let len = Array.length targets
     let memo = Array.init len (fun _ -> Array.create (1 <<< len) None)
     let q = new Queue<_>()
-    let rec bfs bestScore bestPath =
-        if q.Count = 0 then (bestScore, List.rev bestPath)
+    let rec bfs best =
+        if q.Count = 0 then best
         else
-            let (visited, i, time, released, path) = q.Dequeue()
-            if time <= 0 || visited = (1 <<< len) - 1 then 
-                bfs bestScore bestPath
+            let (visited, i, time, released) = q.Dequeue()
+            if time <= 0 || visited = (1 <<< len) - 1 then
+                bfs best
             else
                 let released = released + time * (valve i).flow
                 let visited = visited ||| (1 <<< i)
+                // If we have visited set of valves S and are at valve i, we can't do
+                // better than another path with a higher score at the same stage (i.e. with same S and same i)
+                // so no need to continue the search
                 match memo[i][visited] with
-                | Some bound when bound > released -> bfs bestScore bestPath
+                | Some bound when bound > released -> bfs best 
                 | _ ->
                     memo[i][visited] <- Some released
-                    let path' = (30 - time, (valve i).name) :: path
                     for j = 0 to len - 1 do
                         if visited &&& (1 <<< j) = 0 then
-                            q.Enqueue(visited, j, (time - dists[targets[i]][targets[j]] - 1), released, path')
-                    if released > bestScore then bfs released path' else bfs bestScore bestPath
+                            q.Enqueue(visited, j, (time - (cost i j)), released)
+                    if released > best then bfs released else bfs best
+    for i = 0 to len - 1 do
+        let t = startTime - dists[cave.indices["AA"]][targets[i]] - 1
+        q.Enqueue((0, i, t, 0))
+    bfs 0 
+                                      
+let part1 cave =
+    let targets = cave.graph |> Array.mapi (fun i v -> if v.flow > 0 then Some i else None) |> Array.choose id
+    solve cave targets 30
 
-    for i in 0..(len - 1) do
-        let t = 30 - dists[cave.indices["AA"]][targets[i]] - 1
-        q.Enqueue((0, i, t, 0, []))
-    bfs 0 []
+let bitLength n =
+    let rec loop n i =
+        if n = 0 then i
+        elif n &&& 1 = 1 then loop (n >>> 1) (i + 1)
+        else loop (n >>> 1) i
+    loop n 0
+
+let part2 cave =
+    let targets = cave.graph |> Array.mapi (fun i v -> if v.flow > 0 then Some i else None) |> Array.choose id
+    seq {
+        for toVisit = 0 to (1 <<< (Array.length targets)) / 2 - 1 do
+            // Not sure if this optimization is always valid, but it works on the input
+            // Only consider pairs of sets of equal length, i.e. where you and elephant do the same amount of work
+            if bitLength toVisit = (Array.length targets) / 2 then
+                let targets1 = targets |> Array.mapi (fun i v -> if toVisit &&& (1 <<< i) = 0 then Some v else None) |> Array.choose id
+                let targets2 = targets |> Array.mapi (fun i v -> if toVisit &&& (1 <<< i) > 0 then Some v else None) |> Array.choose id
+                (solve cave targets1 26) + (solve cave targets2 26)
+    }
+    |> Seq.max
 
     
-   
 
-#time
-solveBfs test 
-solveBfs input
+part1 test
+part2 test
 
+part1 input                         
+part2 input
 
