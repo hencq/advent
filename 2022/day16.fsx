@@ -51,15 +51,16 @@ let dists (cave : Cave) =
     dists
 
 // Solve traveling salesman by a bfs with pruning with bounds
-let solve cave (targets : int[]) startTime =
+let solve cave startTime =
+    let targets = cave.graph |> Array.mapi (fun i v -> if v.flow > 0 then Some i else None) |> Array.choose id
     let dists = dists cave
     let cost i j = dists[targets[i]][targets[j]] + 1
     let valve i = cave.graph[targets[i]]
     let len = Array.length targets
-    let memo = Array.init len (fun _ -> Array.create (1 <<< len) None)
+    let memo = Array.init (1 <<< len) (fun _ -> Array.create len 0)
     let q = new Queue<_>()
     let rec bfs best =
-        if q.Count = 0 then best
+        if q.Count = 0 then (best, memo)
         else
             let (visited, i, time, released) = q.Dequeue()
             if time <= 0 || visited = (1 <<< len) - 1 then
@@ -70,10 +71,9 @@ let solve cave (targets : int[]) startTime =
                 // If we have visited set of valves S and are at valve i, we can't do
                 // better than another path with a higher score at the same stage (i.e. with same S and same i)
                 // so no need to continue the search
-                match memo[i][visited] with
-                | Some bound when bound > released -> bfs best 
-                | _ ->
-                    memo[i][visited] <- Some released
+                if memo[visited][i] > released then bfs best 
+                else
+                    memo[visited][i] <- released
                     for j = 0 to len - 1 do
                         if visited &&& (1 <<< j) = 0 then
                             q.Enqueue(visited, j, (time - (cost i j)), released)
@@ -84,31 +84,24 @@ let solve cave (targets : int[]) startTime =
     bfs 0 
                                       
 let part1 cave =
-    let targets = cave.graph |> Array.mapi (fun i v -> if v.flow > 0 then Some i else None) |> Array.choose id
-    solve cave targets 30
-
-let bitLength n =
-    let rec loop n i =
-        if n = 0 then i
-        elif n &&& 1 = 1 then loop (n >>> 1) (i + 1)
-        else loop (n >>> 1) i
-    loop n 0
+    fst (solve cave 30)
 
 let part2 cave =
-    let targets = cave.graph |> Array.mapi (fun i v -> if v.flow > 0 then Some i else None) |> Array.choose id
+    let (_, memo) = solve cave 26
+    let len = memo[0] |> Array.length
     seq {
-        for toVisit = 0 to (1 <<< (Array.length targets)) / 2 - 1 do
-            // Not sure if this optimization is always valid, but it works on the input
-            // Only consider pairs of sets of equal length, i.e. where you and elephant do the same amount of work
-            if bitLength toVisit = (Array.length targets) / 2 then
-                let targets1 = targets |> Array.mapi (fun i v -> if toVisit &&& (1 <<< i) = 0 then Some v else None) |> Array.choose id
-                let targets2 = targets |> Array.mapi (fun i v -> if toVisit &&& (1 <<< i) > 0 then Some v else None) |> Array.choose id
-                (solve cave targets1 26) + (solve cave targets2 26)
+        for visit1 = 0 to (1 <<< len) / 2 do
+            let p1 = memo[visit1] |> Array.max
+            if p1 > 0 then
+                for visit2 = visit1 + 1 to (1 <<< len) - visit1 - 1 do
+                    if visit1 &&& visit2 = 0 then
+                        let p2 = memo[visit2] |> Array.max
+                        (p1 + p2)
     }
     |> Seq.max
 
     
-
+#time
 part1 test
 part2 test
 
