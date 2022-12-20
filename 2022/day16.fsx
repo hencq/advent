@@ -39,7 +39,6 @@ let dists (cave : Cave) =
     for i = 0 to len - 1 do
         for j in cave.graph[i].tunnels do
             dists[i][j] <- 1
-            dists[j][i] <- 1
 
     for k = 0 to len - 1 do
         for i = 0 to len - 1 do
@@ -47,7 +46,6 @@ let dists (cave : Cave) =
                 if i <> j && dists[i][k] > 0 && dists[k][j] > 0 then
                     if dists[i][j] = 0 then dists[i][j] <- dists[i][k] + dists[k][j]
                     else dists[i][j] <- min (dists[i][j]) (dists[i][k] + dists[k][j])
-
     dists
 
 // Solve traveling salesman by a bfs with pruning with bounds
@@ -89,8 +87,11 @@ let part1 cave =
 let part2 cave =
     let (_, memo) = solve cave 26
     let len = memo[0] |> Array.length
+    (* For every set of valves that has a possible solution, see if there's also a solution in the
+       remaining valves.
+    *)
     seq {
-        for visit1 = 0 to (1 <<< len) / 2 do
+        for visit1 = 0 to 1 <<< (len - 1) do
             let p1 = memo[visit1] |> Array.max
             if p1 > 0 then
                 for visit2 = visit1 + 1 to (1 <<< len) - visit1 - 1 do
